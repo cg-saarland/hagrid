@@ -79,7 +79,8 @@ __global__ void count_new_refs(const Entry* __restrict__ entries,
         auto cell_id = cell_ids[id];
         auto entry = entries[cell_id];
         auto cell = load_cell(cells + cell_id);
-        bbox = BBox(vec3(cell.min) * cell_size, vec3(cell.max) * cell_size);
+        bbox = BBox(grid_bbox.min + vec3(cell.min) * cell_size,
+                    grid_bbox.min + vec3(cell.max) * cell_size);
         dims = ivec3(1 << entry.log_dim);
     } else {
         dims = grid_dims;
@@ -88,7 +89,7 @@ __global__ void count_new_refs(const Entry* __restrict__ entries,
 
     auto ref_bb = load_bbox(bboxes + ref);
     auto range  = compute_range(dims, bbox, ref_bb);
-    counts[id]  = range.size();
+    counts[id]  = max(0, range.size());
 }
 
 /// Emit the new references by inserting existing ones into the sub-levels
@@ -116,10 +117,9 @@ __global__ void emit_new_refs(const Entry* __restrict__ entries,
         auto cell_id = cell_ids[id];
         auto entry = entries[cell_id];
         auto cell = load_cell(cells + cell_id);
-        auto bb_min = grid_bbox.min;
         cur_cell = entry.begin;
-        bbox = BBox(bb_min + vec3(cell.min) * cell_size,
-                    bb_min + vec3(cell.max) * cell_size);
+        bbox = BBox(grid_bbox.min + vec3(cell.min) * cell_size,
+                    grid_bbox.min + vec3(cell.max) * cell_size);
         dims = ivec3(1 << entry.log_dim);
     } else {
         cur_cell = 0;
@@ -206,7 +206,7 @@ __global__ void compute_dims(const int*  __restrict__ cell_ids,
     auto top_cell_id = top_level_cell(cell_min);
     auto log_dim = log_dims[top_cell_id];
 
-    entries[cell_id] = Entry(min(log_dim, level_shift), cell_id);
+    entries[cell_id] = Entry(min(log_dim, level_shift), 0);
 }
 
 /// Mark references that are kept so that they can be moved to the beginning of the array
@@ -228,20 +228,17 @@ __global__ void update_entries(const int* __restrict__ start_cell,
     int id = threadIdx.x + blockDim.x * blockIdx.x;
     if (id >= num_cells) return;
 
-    auto start = start_cell[id + 0];
-    auto end   = start_cell[id + 1];
-    
+    auto start = start_cell[id];
+    auto entry = entries[id];
+
     // If the cell is subdivided, write the first sub-cell index into the current entry
-    if (start < end) {
-        auto entry = entries[id];
-        entry.begin = start;
-        entries[id] = entry;
-    }
+    entry.begin = entry.log_dim != 0 ? start : id;
+    entries[id] = entry;
 }
 
 /// Generate new cells based on the previous level
 template <bool first_iter>
-__global__ void emit_new_cells(const int* __restrict__ start_cell,
+__global__ void emit_new_cells(const Entry* __restrict__ entries,
                                const Cell* __restrict__ cells,
                                Cell* __restrict__ new_cells,
                                int num_cells) {
@@ -265,30 +262,30 @@ __global__ void emit_new_cells(const int* __restrict__ start_cell,
         cell.end   = 0;
         store_cell(new_cells + id, cell);
     } else {
-        auto start = start_cell[id + 0];
-        auto end   = start_cell[id + 1];
-        int log_dim = max(__ffs(end - start) - 1, 0) / 3;
+        auto entry = entries[id];
+        auto log_dim = entry.log_dim;
+        if (log_dim == 0) return;
+
+        auto start = entry.begin;
+        auto n = 1 << (3 * log_dim);
 
         auto cell = load_cell(cells + id);
         int min_x = cell.min.x;
         int min_y = cell.min.y;
-        int max_x = cell.max.x;
-        int max_y = cell.max.y;
+        int min_z = cell.min.z;
         int inc = (cell.max.x - cell.min.x) >> log_dim;
+        int mask = (1 << log_dim) - 1;
 
-        int x = min_x, y = min_y, z = cell.min.z;
-        while (start < end) {
-            Cell cell;
+        for (int i = 0; i < n; i++) {
+            int x = min_x + (i & mask) * inc;
+            int y = min_y + ((i >> log_dim) & mask) * inc;
+            int z = min_z + (i >> (2 * log_dim)) * inc;
+
             cell.min = ivec3(x, y, z);
             cell.max = ivec3(x + inc, y + inc, z + inc);
             cell.begin = 0;
             cell.end   = 0;
-            store_cell(new_cells + start, cell);
-
-            start++;
-            x += inc;
-            if (x >= max_x) { x = min_x; y += inc; }
-            if (y >= max_y) { y = min_y; z += inc; }
+            store_cell(new_cells + start + i, cell);
         }
     }
 }
@@ -411,11 +408,12 @@ bool build_iter(MemManager& mem, const BuildParams& params,
         // Store the sub-cells starting index in the entries
         start_cell = mem.alloc<int>(Slot::START_CELL, num_cells + 1);
         num_new_cells = par.scan(par.transform(entries, [] __device__ (Entry e) {
-            int d = 1 << e.log_dim;
-            return d == 1 ? 0 : d * d * d;
+            return e.log_dim == 0 ? 0 : 1 << (e.log_dim * 3);
         }), num_cells + 1, start_cell);
         update_entries<<<round_div(num_cells, 64), 64>>>(start_cell, entries, num_cells);
         DEBUG_SYNC();
+
+        mem.free(Slot::START_CELL);
 
         // Partition the set of cells into the sets of those which will be split and those which won't
         auto tmp_ref_ids  = mem.alloc<int>(Slot::ref_array(cur_level), num_refs * 2);
@@ -451,7 +449,6 @@ bool build_iter(MemManager& mem, const BuildParams& params,
 
     if (num_new_refs == 0) {
         // Exit here because no new reference will be emitted
-        if (!first_iter) mem.free(Slot::START_CELL);
         mem.free(Slot::START_EMIT);
         mem.free(Slot::LOG_DIMS);
         log_dims = nullptr;
@@ -467,7 +464,7 @@ bool build_iter(MemManager& mem, const BuildParams& params,
         new_ref_ids, new_cell_ids,
         num_split);
     DEBUG_SYNC();
-    
+
     mem.free(Slot::START_EMIT);
 
     if (first_iter) {
@@ -486,7 +483,7 @@ bool build_iter(MemManager& mem, const BuildParams& params,
         auto grid_shift = par.reduce(log_dims, num_top_cells, log_dims + num_top_cells, [] __device__ (int a, int b) { return max(a, b); });
         auto cell_size = grid_bb.extents() / vec3(dims << grid_shift);
 
-        //std::cout << "dims: (2^" << grid_shift << ") * " << dims.x << "x" << dims.y << "x" << dims.z << std::endl; 
+        //std::cout << "dims: (2^" << grid_shift << ") * " << dims.x << "x" << dims.y << "x" << dims.z << std::endl;
 
         set_global(hagrid::grid_shift, &grid_shift);
         set_global(hagrid::cell_size,  &cell_size);
@@ -495,11 +492,9 @@ bool build_iter(MemManager& mem, const BuildParams& params,
     // Emission of the new cells
     auto new_cells   = mem.alloc<Cell >(Slot::cell_array(cur_level),  num_new_cells + 0);
     auto new_entries = mem.alloc<Entry>(Slot::entry_array(cur_level), num_new_cells + 1);
-    emit_new_cells<first_iter><<<round_div(num_cells, 64), 64>>>(start_cell, cells, new_cells, num_cells);
+    emit_new_cells<first_iter><<<round_div(num_cells, 64), 64>>>(entries, cells, new_cells, num_cells);
     DEBUG_SYNC();
     mem.zero(new_entries, num_new_cells + 1);
-
-    if (!first_iter) mem.free(Slot::START_CELL);
 
     levels.emplace_back(new_ref_ids, new_cell_ids, num_new_refs, num_new_refs, new_cells, new_entries, num_new_cells);
     return true;
@@ -527,6 +522,7 @@ void concat_levels(MemManager& mem, std::vector<Level>& levels, Cell*& cells, En
     for (int i = 0, off = 0, cell_off = 0; i < levels.size(); off += levels[i].num_kept, cell_off += levels[i].num_cells, i++) {
         int num_kept = levels[i].num_kept;
         copy_refs<<<round_div(num_kept, 64), 64>>>(levels[i].cell_ids, cell_ids + off, cell_off, num_kept);
+        DEBUG_SYNC();
         mem.free(Slot::ref_array(i));
     }
 
@@ -535,6 +531,7 @@ void concat_levels(MemManager& mem, std::vector<Level>& levels, Cell*& cells, En
     for (int i = 0, cell_off = 0; i < levels.size(); cell_off += levels[i].num_cells, i++) {
         int num_cells = levels[i].num_cells;
         mark_kept_cells<<<round_div(num_cells, 64), 64>>>(levels[i].entries, kept_cells + cell_off, num_cells);
+        DEBUG_SYNC();
     }
 
     // Compute the insertion position of each cell
@@ -547,6 +544,7 @@ void concat_levels(MemManager& mem, std::vector<Level>& levels, Cell*& cells, En
     for (int i = 0, cell_off = 0; i < levels.size(); cell_off += levels[i].num_cells, i++) {
         int num_cells = levels[i].num_cells;
         copy_cells<<<round_div(num_cells, 64), 64>>>(levels[i].cells, start_cell, cells, cell_off, num_cells);
+        DEBUG_SYNC();
         mem.free(Slot::cell_array(i));
     }
 
@@ -555,11 +553,14 @@ void concat_levels(MemManager& mem, std::vector<Level>& levels, Cell*& cells, En
         int num_cells = levels[i].num_cells;
         int next_level_off = off + num_cells;
         copy_entries<<<round_div(num_cells, 64), 64>>>(levels[i].entries, start_cell, entries + off, off, next_level_off, num_cells);
+        DEBUG_SYNC();
         mem.free(Slot::entry_array(i));
     }
 
     // Remap the cell indices in the references (which currently map to incorrect cells)
     remap_refs<<<round_div(total_refs, 64), 64>>>(cell_ids, start_cell, total_refs);
+    DEBUG_SYNC();
+
     mem.free(Slot::START_CELL);
 
     /*std::cout << new_total_cells << " cell(s), " << total_refs << " ref(s)" << std::endl;
@@ -582,6 +583,7 @@ void concat_levels(MemManager& mem, std::vector<Level>& levels, Cell*& cells, En
 
     // Compute the ranges of references for each cell
     compute_cell_ranges<<<round_div(total_refs, 64), 64>>>(cell_ids, cells, total_refs);
+    DEBUG_SYNC();
 }
 
 template <typename Primitive>
@@ -621,7 +623,8 @@ void build(MemManager& mem, const BuildParams& params, const Primitive* prims, i
     int total_refs = 0, total_cells = 0;
     for (int i = 0; i < levels.size(); i++) {
         std::cout << "* level (" << i << "):\n"
-                  << "   _ " << levels[i].num_kept << " ref(s)\n"
+                  << "   _ " << levels[i].num_refs << " ref(s)\n"
+                  << "     " << levels[i].num_kept << " kept\n"
                   << "   _ " << levels[i].num_cells << " cell(s)" << std::endl;
         total_refs  += levels[i].num_refs;
         total_cells += levels[i].num_cells;
@@ -635,8 +638,6 @@ void build(MemManager& mem, const BuildParams& params, const Primitive* prims, i
     int* ref_ids;
     int* cell_ids;
     concat_levels(mem, levels, cells, entries, ref_ids, cell_ids);
-
-    //std::cout << "Peak usage: " << mem.peak_usage() / (1024.0 * 1024.0) << " MB" << std::endl;
 }
 
 void build_grid(MemManager& mem, const BuildParams& params, const Tri* tris, int num_tris, Grid& grid) { build(mem, params, tris, num_tris, grid); }

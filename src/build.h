@@ -21,7 +21,7 @@ struct BuildParams {
                snd_density >= 0 &&
                alpha >= 0 &&
                expansion >= 0 &&
-               level_shift >= 1;
+               level_shift >= 1 && level_shift < (1 << Entry::LOG_DIM_BITS);
     }
 
     /// Default construction parameters for a static scene

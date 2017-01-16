@@ -43,7 +43,9 @@ int main(int argc, char** argv) {
         }
     }
 
-    MemManager mem(true);
+    std::cout << host_tris.size() << " triangle(s)" << std::endl;
+
+    MemManager mem;
     auto tris = mem.alloc<Tri>(host_tris.size());
     mem.copy<Copy::HST_TO_DEV>(tris, host_tris.data(), host_tris.size());
     
@@ -70,6 +72,8 @@ int main(int argc, char** argv) {
         total += ms;
     }
     std::cout << total / 50 << "ms" << std::endl;
+
+    std::cout << "Peak usage: " << mem.peak_usage() / (1024.0 * 1024.0) << " MB" << std::endl;
 
     mem.free(tris);
     return 0;

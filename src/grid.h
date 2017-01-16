@@ -8,8 +8,13 @@ namespace hagrid {
 
 /// Voxel map entry
 struct Entry {
-    uint32_t log_dim :  2;      ///< Logarithm of the dimensions of the entry (0 for leaves)
-    uint32_t begin   : 29;      ///< Next entry index (cell index for leaves)
+    enum {
+        LOG_DIM_BITS = 2,
+        BEGIN_BITS   = 32 - LOG_DIM_BITS
+    };
+
+    uint32_t log_dim : LOG_DIM_BITS;    ///< Logarithm of the dimensions of the entry (0 for leaves)
+    uint32_t begin   : BEGIN_BITS;      ///< Next entry index (cell index for leaves)
 
     HOST DEVICE Entry(uint32_t l, uint32_t b)
         : log_dim(l), begin(b)
@@ -56,12 +61,12 @@ struct Range {
 /// Computes the range of cells that intersect the given box
 HOST DEVICE inline Range compute_range(const ivec3& dims, const BBox& grid_bb, const BBox& obj_bb) {
     auto inv = vec3(dims) / grid_bb.extents();
-    int lx = clamp((int)((obj_bb.min.x - grid_bb.min.x) * inv.x), 0, dims.x - 1);
-    int ly = clamp((int)((obj_bb.min.y - grid_bb.min.y) * inv.y), 0, dims.y - 1);
-    int lz = clamp((int)((obj_bb.min.z - grid_bb.min.z) * inv.z), 0, dims.z - 1);
-    int hx = clamp((int)((obj_bb.max.x - grid_bb.min.x) * inv.x), 0, dims.x - 1);
-    int hy = clamp((int)((obj_bb.max.y - grid_bb.min.y) * inv.y), 0, dims.y - 1);
-    int hz = clamp((int)((obj_bb.max.z - grid_bb.min.z) * inv.z), 0, dims.z - 1);
+    int lx = max((int)((obj_bb.min.x - grid_bb.min.x) * inv.x), 0);
+    int ly = max((int)((obj_bb.min.y - grid_bb.min.y) * inv.y), 0);
+    int lz = max((int)((obj_bb.min.z - grid_bb.min.z) * inv.z), 0);
+    int hx = min((int)((obj_bb.max.x - grid_bb.min.x) * inv.x), dims.x - 1);
+    int hy = min((int)((obj_bb.max.y - grid_bb.min.y) * inv.y), dims.y - 1);
+    int hz = min((int)((obj_bb.max.z - grid_bb.min.z) * inv.z), dims.z - 1);
     return Range(lx, ly, lz, hx, hy, hz);
 }
 
