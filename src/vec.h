@@ -1,6 +1,7 @@
 #ifndef VEC_H
 #define VEC_H
 
+#include <cmath>
 #include "common.h"
 
 namespace hagrid {
@@ -43,7 +44,8 @@ template <typename T> HOST DEVICE tvec2<T> min(const tvec2<T>& a, const tvec2<T>
 template <typename T> HOST DEVICE tvec2<T> max(const tvec2<T>& a, const tvec2<T>& b) { return tvec2<T>(max(a.x, b.x), max(a.y, b.y)); }
 template <typename T> HOST DEVICE tvec2<T> clamp(const tvec2<T>& a, T b, T c) { return tvec2<T>(min(max(a.x, b), c), min(max(a.y, b), c)); }
 template <typename T> HOST DEVICE T dot(const tvec2<T>& a, const tvec2<T>& b) { return a.x * b.x + a.y * b.y; }
-
+template <typename T> HOST DEVICE T length(const tvec2<T>& a) { return std::sqrt(dot(a, a)); }
+template <typename T> HOST DEVICE tvec2<T> normalize(const tvec2<T>& a) { return a * (1.0f / length(a)); }
 
 template <typename T>
 struct tvec3 {
@@ -85,12 +87,37 @@ template <typename T> HOST DEVICE tvec3<T> min(const tvec3<T>& a, const tvec3<T>
 template <typename T> HOST DEVICE tvec3<T> max(const tvec3<T>& a, const tvec3<T>& b) { return tvec3<T>(max(a.x, b.x), max(a.y, b.y), max(a.z, b.z)); }
 template <typename T> HOST DEVICE tvec3<T> clamp(const tvec3<T>& a, T b, T c) { return tvec3<T>(min(max(a.x, b), c), min(max(a.y, b), c), min(max(a.z, b), c)); }
 template <typename T> HOST DEVICE T dot(const tvec3<T>& a, const tvec3<T>& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+template <typename T> HOST DEVICE T length(const tvec3<T>& a) { return std::sqrt(dot(a, a)); }
+template <typename T> HOST DEVICE tvec3<T> normalize(const tvec3<T>& a) { return a * (1.0f / length(a)); }
 
 template <typename T>
 HOST DEVICE tvec3<T> cross(const tvec3<T>& a, const tvec3<T>& b) {
     return tvec3<T>(a.y * b.z - a.z * b.y,
                     a.z * b.x - a.x * b.z,
                     a.x * b.y - a.y * b.x);
+}
+
+template <typename T>
+HOST DEVICE tvec3<T> rotate(const tvec3<T>& v, const tvec3<T>& axis, T angle) {
+    T half = angle / 2; 
+   
+    T q[4] = {
+        axis.x * std::sin(half),
+        axis.y * std::sin(half),
+        axis.z * std::sin(half),
+        std::cos(half)
+    };
+
+    T p[4] = {
+        q[3] * v.x + q[1] * v.z - q[2] * v.y,
+        q[3] * v.y - q[0] * v.z + q[2] * v.x,
+        q[3] * v.z + q[0] * v.y - q[1] * v.x,
+        -(q[0] * v.x + q[1] * v.y + q[2] * v.z)
+    };
+
+    return tvec3<T>(p[3] * -q[0] + p[0] *  q[3] + p[1] * -q[2] - p[2] * -q[1],
+                    p[3] * -q[1] - p[0] * -q[2] + p[1] *  q[3] + p[2] * -q[0],
+                    p[3] * -q[2] + p[0] * -q[1] - p[1] * -q[0] + p[2] *  q[3]);
 }
 
 typedef tvec2<float> vec2;

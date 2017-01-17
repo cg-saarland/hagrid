@@ -22,4 +22,4 @@ cuda_compile(HAGRID_BUILD
 
 add_executable(hagrid ${HAGRID_BUILD} main.cpp load_obj.cpp load_obj.h vec.h)
 target_compile_definitions(hagrid PRIVATE HOST= DEVICE=)
-target_link_libraries(hagrid ${CUDA_LIBRARIES})
+target_link_libraries(hagrid ${SDL2_LIBRARY} ${CUDA_LIBRARIES})
