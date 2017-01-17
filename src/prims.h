@@ -4,6 +4,7 @@
 #include <cmath>
 #include "vec.h"
 #include "bbox.h"
+#include "ray.h"
 
 namespace hagrid {
 
@@ -134,12 +135,43 @@ HOST DEVICE inline bool intersect_tri_box(const vec3& v0, const vec3& e1, const 
     return true;
 }
 
-HOST DEVICE inline bool intersect_primitive_box(const Tri& tri, const BBox& bbox) {
+HOST DEVICE inline bool intersect_prim_box(const Tri& tri, const BBox& bbox) {
     return intersect_tri_box<false, true>(tri.v0, tri.e1, tri.e2, tri.normal(), bbox.min, bbox.max);
 }
 
+HOST DEVICE inline bool intersect_prim_ray(const Tri& tri, const Ray& ray, int id, Hit& hit) {
+    // Moeller Trumbore
+    auto n = tri.normal();
+
+    auto c = tri.v0 - ray.org;
+    auto r = cross(ray.dir, c);
+    auto det = dot(n, ray.dir);
+    auto abs_det = fabs(det);
+
+    auto u = prodsign(dot(r, tri.e2), det);
+    auto v = prodsign(dot(r, tri.e1), det);
+    auto w = abs_det - u - v;
+
+    auto eps = 1e-9f;
+    if (u >= -eps && v >= -eps && w >= -eps) {
+        auto t = prodsign(dot(n, c), det);
+        if (t >= abs_det * ray.tmin && abs_det * ray.tmax > t) {
+            auto inv_det = 1.0f / abs_det;
+            hit.t = t * inv_det;
+#ifdef COMPUTE_UVS
+            hit.u = u * inv_det;
+            hit.v = v * inv_det;
+#endif
+            hit.id = id;
+            return true;
+        }
+    }
+
+    return false;
+}
+
 #ifdef __NVCC__
-__device__ Tri load_prim(const Tri* tri_ptr) {
+__device__ __forceinline__ Tri load_prim(const Tri* tri_ptr) {
     const float4* ptr = (const float4*)tri_ptr;
     auto tri0 = ptr[0];
     auto tri1 = ptr[1];

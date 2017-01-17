@@ -80,7 +80,7 @@ struct BBox {
 };
 
 #ifdef __NVCC__
-__device__ BBox load_bbox(const BBox* bb_ptr) {
+__device__ __forceinline__ BBox load_bbox(const BBox* bb_ptr) {
     const float4* ptr = (const float4*)bb_ptr;
     auto bb0 = ptr[0];
     auto bb1 = ptr[1];
@@ -88,7 +88,7 @@ __device__ BBox load_bbox(const BBox* bb_ptr) {
                 vec3(bb1.x, bb1.y, bb1.z));
 }
 
-__device__ void store_bbox(BBox* bb_ptr, const BBox& bb) {
+__device__ __forceinline__ void store_bbox(BBox* bb_ptr, const BBox& bb) {
     float4* ptr = (float4*)bb_ptr;
     ptr[0] = make_float4(bb.min.x, bb.min.y, bb.min.z, 0);
     ptr[1] = make_float4(bb.max.x, bb.max.y, bb.max.z, 0);

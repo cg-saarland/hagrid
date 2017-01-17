@@ -1,8 +1,8 @@
 #ifndef BUILD_H
 #define BUILD_H
 
-#include "primitives.h"
 #include "mem_manager.h"
+#include "prims.h"
 #include "grid.h"
 
 namespace hagrid {

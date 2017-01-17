@@ -1,13 +1,14 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+#include <cstdint>
+#include <cmath>
+
 #ifdef __NVCC__
 #include <iostream>
 #endif
 
 namespace hagrid {
-
-typedef unsigned int uint;
 
 /// Rounds the division by an integer so that round_div(i, j) * j > i
 HOST DEVICE inline int round_div(int i, int j) {
@@ -22,40 +23,34 @@ template <typename T> HOST DEVICE T max(T a, T b) { return a > b ? a : b; }
 template <typename T> HOST DEVICE T clamp(T a, T b, T c) { return min(c, max(b, a)); }
 
 /// Reinterprets a values as unsigned int
-template <typename T>
-HOST DEVICE uint as_uint(T t) {
-    union { T t; uint u; } v;
+template <typename U, typename T>
+HOST DEVICE U as(T t) {
+    union { T t; U u; } v;
     v.t = t;
     return v.u;
 }
 
-/// Reinterprets a values as int
-template <typename T>
-HOST DEVICE int as_int(T t) {
-    union { T t; int i; } v;
-    v.t = t;
-    return v.i;
+/// Returns x with the sign of x * y
+HOST DEVICE inline float safe_rcp(float x) {
+    return x != 0 ? 1.0f / x : copysign(as<float>(0x7f800000u), x);
 }
 
-/// Reinterprets a values as float
-template <typename T>
-HOST DEVICE float as_float(T t) {
-    union { T t; float f; } v;
-    v.t = t;
-    return v.f;
+/// Returns x with the sign of x * y
+HOST DEVICE inline float prodsign(float x, float y) {
+    return as<float>(as<uint32_t>(x) ^ (as<uint32_t>(y) & 0x80000000));
 }
 
 /// Converts a float to an ordered float
-HOST DEVICE inline uint float_to_ordered(float f) {
-    const uint u = as_uint(f);
-    const uint mask = -(int)(u >> 31) | 0x80000000;
+HOST DEVICE inline uint32_t float_to_ordered(float f) {
+    auto u = as<uint32_t>(f);
+    auto mask = -(int)(u >> 31u) | 0x80000000u;
     return u ^ mask;
 }
 
 /// Converts back an ordered integer to float
-HOST DEVICE inline float ordered_to_float(uint u) {
-    const uint mask = ((u >> 31) - 1) | 0x80000000;
-    return as_float(u ^ mask);
+HOST DEVICE inline float ordered_to_float(uint32_t u) {
+    auto mask = ((u >> 31u) - 1u) | 0x80000000u;
+    return as<float>(u ^ mask);
 }
 
 /// Computes the cubic root of an integer

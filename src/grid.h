@@ -36,12 +36,15 @@ struct Cell {
 
 /// Structure holding an irregular grid
 struct Grid {
-    Entry* voxel_map;   ///< Voxel map, stored as a contiguous array
-    int*   tri_ids;     ///< Array of primitive references
+    Entry* entries;     ///< Voxel map, stored as a contiguous array
+    int*   ref_ids;     ///< Array of primitive references
     Cell*  cells;       ///< Cells of the structure
 
+    BBox bbox;          ///< Bounding box of the scene
+    ivec3 top_dims;     ///< Top-level dimensions
     int num_cells;      ///< Number of cells
-    int num_entries;    ///< Number of element of the voxel map
+    int num_levels;     ///< Maximum octree depth of all cells
+    int num_entries;    ///< Number of elements in the voxel map
     int num_refs;       ///< Number of primitive references
 };
 
@@ -76,6 +79,21 @@ HOST DEVICE inline ivec3 compute_grid_dims(const BBox& bb, int num_prims, float 
     const float volume = extents.x * extents.y * extents.z;
     const float ratio = cbrtf(density * num_prims / volume);
     return max(ivec3(1), ivec3(extents.x * ratio, extents.y * ratio, extents.z * ratio));
+}
+
+HOST DEVICE inline uint32_t lookup_entry(const Entry* entries, int shift, const ivec3& dims, const ivec3& voxel) {
+    auto entry = entries[(voxel.x >> shift) + dims.x * ((voxel.y >> shift) + dims.y * (voxel.z >> shift))];
+    auto log_dim = entry.log_dim, d = log_dim;
+    while (log_dim) {
+        auto begin = entry.begin;
+        auto mask = (1 << log_dim) - 1;
+
+        auto k = (voxel >> int(shift - d)) & mask;
+        entry = entries[begin + k.x + ((k.y + (k.z << log_dim)) << log_dim)];
+        log_dim = entry.log_dim;
+        d += log_dim;
+    }
+    return entry.begin;
 }
 
 #ifdef __NVCC__

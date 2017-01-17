@@ -7,12 +7,16 @@ endif()
 
 cuda_compile(HAGRID_BUILD
     build.cu
+    traverse.cu
     mem_manager.cu
     mem_manager.h
     parallel.cuh
+    traverse.h
     grid.h
     vec.h
     bbox.h
+    prims.h
+    ray.h
     common.h
     OPTIONS ${OPT_FLAG} "-std=c++11;--expt-extended-lambda;-arch=sm_52;-lineinfo;-DHOST=__host__;-DDEVICE=__device__")
 
