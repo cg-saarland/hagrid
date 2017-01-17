@@ -376,7 +376,7 @@ template <bool first_iter, typename Primitive>
 bool build_iter(MemManager& mem, const BuildParams& params,
                 const Primitive* prims, int num_prims,
                 const BBox* bboxes, const BBox& grid_bb, const ivec3& dims,
-                int*& log_dims, std::vector<Level>& levels) {
+                int*& log_dims, int& grid_shift, std::vector<Level>& levels) {
     Parallel par(mem);
 
     int* cell_ids  = first_iter ? nullptr : levels.back().cell_ids;
@@ -479,7 +479,7 @@ bool build_iter(MemManager& mem, const BuildParams& params,
         mem.free(Slot::REFS_PER_CELL);
 
         // Find the maximum resolution
-        auto grid_shift = par.reduce(log_dims, num_top_cells, log_dims + num_top_cells, [] __device__ (int a, int b) { return max(a, b); });
+        grid_shift = par.reduce(log_dims, num_top_cells, log_dims + num_top_cells, [] __device__ (int a, int b) { return max(a, b); });
         auto cell_size = grid_bb.extents() / vec3(dims << grid_shift);
 
         set_global(hagrid::grid_shift, &grid_shift);
@@ -614,18 +614,20 @@ void build(MemManager& mem, const BuildParams& params, const Primitive* prims, i
     set_global(hagrid::grid_bbox, &grid_bb);
 
     int* log_dims = nullptr;
+    int grid_shift = 0;
     std::vector<Level> levels;
 
     // Build top level
-    build_iter<true>(mem, params, prims, num_prims, bboxes, grid_bb, dims, log_dims, levels);
+    build_iter<true>(mem, params, prims, num_prims, bboxes, grid_bb, dims, log_dims, grid_shift, levels);
 
     int iter = 1;
-    while (build_iter<false>(mem, params, prims, num_prims, bboxes, grid_bb, dims, log_dims, levels)) iter++;
+    while (build_iter<false>(mem, params, prims, num_prims, bboxes, grid_bb, dims, log_dims, grid_shift, levels)) iter++;
     mem.free(Slot::BBOXES);
 
     concat_levels(mem, levels, grid);
     grid.top_dims = dims;
-    grid.bbox = grid_bb;
+    grid.shift    = grid_shift;
+    grid.bbox     = grid_bb;
 }
 
 void build_grid(MemManager& mem, const BuildParams& params, const Tri* tris, int num_tris, Grid& grid) { build(mem, params, tris, num_tris, grid); }

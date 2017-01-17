@@ -42,8 +42,9 @@ struct Grid {
 
     BBox bbox;          ///< Bounding box of the scene
     ivec3 top_dims;     ///< Top-level dimensions
+    int shift;          ///< Maximum octree depth of all cells
     int num_cells;      ///< Number of cells
-    int num_levels;     ///< Maximum octree depth of all cells
+    int num_levels;     ///< Maximum depth of the voxel map
     int num_entries;    ///< Number of elements in the voxel map
     int num_refs;       ///< Number of primitive references
 };
