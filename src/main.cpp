@@ -61,7 +61,7 @@ void update_surface(SDL_Surface* surf, std::vector<Hit>& hits, float clip, int w
     for (int y = 0, my = std::min(surf->h, h); y < my; y++) {
         unsigned char* row = (unsigned char*)surf->pixels + surf->pitch * y;
         for (int x = 0, mx = std::min(surf->w, w); x < mx; x++) {
-            const unsigned char color = display_mode ? hits[y * w + x].id : 255.0f / clip;
+            const unsigned char color = display_mode ? hits[y * w + x].id : 255.0f * hits[y * w + x].t / clip;
             row[x * 4 + 0] = color;
             row[x * 4 + 1] = color;
             row[x * 4 + 2] = color;
@@ -286,7 +286,7 @@ int main(int argc, char** argv) {
 
     std::cout << host_tris.size() << " triangle(s)" << std::endl;
 
-    MemManager mem(opts.build_iter + opts.build_warmup > 1);
+    MemManager mem((opts.build_iter + opts.build_warmup) > 1);
     auto tris = mem.alloc<Tri>(host_tris.size());
     mem.copy<Copy::HST_TO_DEV>(tris, host_tris.data(), host_tris.size());
 
@@ -299,17 +299,14 @@ int main(int argc, char** argv) {
     }
 
     // Benchmark construction speed
-    double total = 0;
+    double total_time = 0;
     for (int i = 0; i < opts.build_iter; i++) {
         mem.free_all();
-        auto t0 = std::chrono::high_resolution_clock::now();
-        build_grid(mem, opts.build_params, tris, host_tris.size(), grid);
-        auto t1 = std::chrono::high_resolution_clock::now();
-        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
-        total += ms;
+        auto kernel_time = profile([&] { build_grid(mem, opts.build_params, tris, host_tris.size(), grid); });
+        total_time += kernel_time;
     }
-    auto dims = grid.top_dims << grid.shift;
-    std::cout << "Grid built in " << total / opts.build_iter << " ms ("
+    auto dims = grid.dims << grid.shift;
+    std::cout << "Grid built in " << total_time / opts.build_iter << " ms ("
               << dims.x << "x" << dims.y << "x" << dims.z << ", "
               << grid.num_cells << " cells, " << grid.num_refs << " references)" << std::endl;
 
@@ -342,11 +339,11 @@ int main(int argc, char** argv) {
     SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
 
     View view = {
-        vec3(0.0f, 0.0f, -10.0f),   // Eye
-        vec3(0.0f, 0.0f, 1.0f),     // Forward
-        vec3(1.0f, 0.0f, 0.0f),     // Right
-        vec3(0.0f, 1.0f, 0.0f),     // Up
-        100.0f, 0.005f, 1.0f        // View distance, rotation speed, translation speed
+        vec3(0.0f,  0.0f, -10.0f),   // Eye
+        vec3(0.0f,  0.0f, 1.0f),     // Forward
+        vec3(-1.0f, 0.0f, 0.0f),     // Right
+        vec3(0.0f,  1.0f, 0.0f),     // Up
+        100.0f, 0.005f, 1.0f         // View distance, rotation speed, translation speed
     };
 
     size_t num_rays = opts.width * opts.height;
@@ -369,15 +366,12 @@ int main(int argc, char** argv) {
         gen_rays(cam, host_rays, opts.clip, opts.width, opts.height);
         mem.copy<Copy::HST_TO_DEV>(rays, host_rays.data(), num_rays);
 
-        auto t0 = std::chrono::high_resolution_clock::now();
-        traverse(grid, tris, rays, hits, num_rays);
-        auto t1 = std::chrono::high_resolution_clock::now();
-        kernel_time += std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+        kernel_time += profile([&] { traverse(grid, tris, rays, hits, num_rays); });
         frames++;
 
         if (SDL_GetTicks() - ticks >= 500) {
             std::ostringstream caption;
-            caption << "HaGrid [" << double(frames) * double(opts.width * opts.height) / kernel_time << " MRays/s]";
+            caption << "HaGrid [" << double(frames) * double(opts.width * opts.height) / (1000 * kernel_time) << " MRays/s]";
             SDL_SetWindowTitle(win, caption.str().c_str());
             ticks = SDL_GetTicks();
             kernel_time = 0;

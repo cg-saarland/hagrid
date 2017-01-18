@@ -42,6 +42,7 @@ __global__ void traverse_grid(const Entry* __restrict__ entries,
     auto tend   = fmin(tbox.y, ray.tmax);
 
     auto hit = Hit(-1, ray.tmax, 0, 0);
+    int steps = 0;
     ivec3 voxel;
 
     // Early exit if the ray does not hit the grid
@@ -73,9 +74,11 @@ __global__ void traverse_grid(const Entry* __restrict__ entries,
         voxel.y = ray.dir.y >= 0.0f ? max(next_voxel.y, voxel.y) : min(next_voxel.y, voxel.y);
         voxel.z = ray.dir.z >= 0.0f ? max(next_voxel.z, voxel.z) : min(next_voxel.z, voxel.z);
 
+        steps += 1 + max(0, cell.end - cell.begin);
+
         // Intersect the cell contents and exit if an intersection was found
         for (int i = cell.begin; i < cell.end; i++) {
-            const int ref = ref_ids[i];
+            auto ref = ref_ids[i];
             auto prim = load_prim(prims + ref);
             intersect_prim_ray(prim, Ray(ray.org, ray.tmin, ray.dir, hit.t), ref, hit);
         }
@@ -88,20 +91,22 @@ __global__ void traverse_grid(const Entry* __restrict__ entries,
     }
 
 exit:
+    hit.id = steps;
     store_hit(hits + id, hit);
 }
 
 void setup_traversal(const Grid& grid) {
     auto extents = grid.bbox.extents();
-    auto grid_inv  = vec3(grid.top_dims) / extents;
-    auto cell_size = extents / vec3(grid.top_dims);
+    auto dims = grid.dims << grid.shift;
+    auto grid_inv  = vec3(dims) / extents;
+    auto cell_size = extents / vec3(dims);
 
-    set_global(hagrid::grid_dims,  &grid.top_dims);
     set_global(hagrid::grid_min,   &grid.bbox.min);
     set_global(hagrid::grid_max,   &grid.bbox.max);
+    set_global(hagrid::grid_dims,  &dims);
     set_global(hagrid::cell_size,  &cell_size);
     set_global(hagrid::grid_inv,   &grid_inv);
-    set_global(hagrid::grid_shift, &grid.num_levels);
+    set_global(hagrid::grid_shift, &grid.shift);
 }
 
 void traverse(const Grid& grid, const Tri* tris, const Ray* rays, Hit* hits, int num_rays) {

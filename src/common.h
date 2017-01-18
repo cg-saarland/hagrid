@@ -1,6 +1,7 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+#include <functional>
 #include <cstdint>
 #include <cmath>
 
@@ -9,6 +10,9 @@
 #endif
 
 namespace hagrid {
+
+/// Returns the number of milliseconds elapsed on the device for the given function
+HOST float profile(std::function<void()>);
 
 /// Rounds the division by an integer so that round_div(i, j) * j > i
 HOST DEVICE inline int round_div(int i, int j) {

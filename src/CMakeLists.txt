@@ -9,6 +9,7 @@ cuda_compile(HAGRID_BUILD
     build.cu
     traverse.cu
     mem_manager.cu
+    profile.cu
     mem_manager.h
     parallel.cuh
     traverse.h

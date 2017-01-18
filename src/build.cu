@@ -358,18 +358,21 @@ __global__ void remap_refs(int* __restrict__ cell_ids,
 }
 
 /// Sets the cell ranges after run length encoding on references
-__global__ void compute_cell_ranges(const int* __restrict__ cell_ids,
-                                    Cell* cells,
-                                    int num_refs) {
+__global__ void compute_cell_ranges(const int* cell_ids, Cell* cells, int num_refs) {
     int id = threadIdx.x + blockDim.x * blockIdx.x;
     if (id >= num_refs) return;
 
-    bool last = id >= num_refs - 1;
     int cell_id = cell_ids[id + 0];
-    int next_id = last ? -1 : cell_ids[id + 1];
+    if (id >= num_refs - 1) {
+        cells[cell_id].end = id + 1;
+        return;
+    }
+    int next_id = cell_ids[id + 1];
 
-    if (cell_id != next_id) cells[cell_id].end   = id;
-    if (!last)              cells[next_id].begin = id;
+    if (cell_id != next_id) {
+        cells[cell_id].end   = id + 1;
+        cells[next_id].begin = id + 1;
+    }
 }
 
 template <bool first_iter, typename Primitive>
@@ -420,19 +423,25 @@ bool build_iter(MemManager& mem, const BuildParams& params,
         auto tmp_cell_ids = tmp_ref_ids + num_refs;
         int num_sel_refs  = par.partition(ref_ids,  tmp_ref_ids,  num_refs, kept_flags);
         int num_sel_cells = par.partition(cell_ids, tmp_cell_ids, num_refs, kept_flags);
-
         assert(num_sel_refs == num_sel_cells);
-        mem.free(Slot::KEPT_FLAGS);
 
         std::swap(tmp_ref_ids,  ref_ids);
         std::swap(tmp_cell_ids, cell_ids);
         mem.swap(Slot::ref_array(cur_level), Slot::ref_array(prev_level));
         mem.free(Slot::ref_array(cur_level));
+        mem.free(Slot::KEPT_FLAGS);
 
         num_kept = num_sel_refs;
         levels.back().ref_ids  = ref_ids;
         levels.back().cell_ids = cell_ids;
         levels.back().num_kept = num_kept;
+    }
+
+    if (num_new_cells == 0) {
+        // Exit here because no new reference will be emitted
+        mem.free(Slot::LOG_DIMS);
+        log_dims = nullptr;
+        return false;
     }
 
     int num_split = num_refs - num_kept;
@@ -445,14 +454,6 @@ bool build_iter(MemManager& mem, const BuildParams& params,
 
     int num_new_refs = par.scan(new_ref_counts, num_split + 1, start_emit);
     mem.free(Slot::NEW_REF_COUNTS);
-
-    if (num_new_refs == 0) {
-        // Exit here because no new reference will be emitted
-        mem.free(Slot::START_EMIT);
-        mem.free(Slot::LOG_DIMS);
-        log_dims = nullptr;
-        return false;
-    }
 
     auto new_ref_ids  = mem.alloc<int>(Slot::ref_array(cur_level), 2 * num_new_refs);
     auto new_cell_ids = new_ref_ids + num_new_refs;
@@ -511,12 +512,12 @@ void concat_levels(MemManager& mem, std::vector<Level>& levels, Grid& grid) {
 
     // Copy primitive references as-is
     auto ref_ids = mem.alloc<int>(Slot::ref_array(num_levels + 0), total_refs);
-    for (int i = 0, off = 0; i < levels.size(); off += levels[i].num_kept, i++) {
+    for (int i = 0, off = 0; i < num_levels; off += levels[i].num_kept, i++) {
         mem.copy<Copy::DEV_TO_DEV>(ref_ids + off, levels[i].ref_ids, levels[i].num_kept);
     }
     // Copy the cell indices with an offset
     auto cell_ids = mem.alloc<int>(Slot::ref_array(num_levels + 1), total_refs);
-    for (int i = 0, off = 0, cell_off = 0; i < levels.size(); off += levels[i].num_kept, cell_off += levels[i].num_cells, i++) {
+    for (int i = 0, off = 0, cell_off = 0; i < num_levels; off += levels[i].num_kept, cell_off += levels[i].num_cells, i++) {
         int num_kept = levels[i].num_kept;
         copy_refs<<<round_div(num_kept, 64), 64>>>(levels[i].cell_ids, cell_ids + off, cell_off, num_kept);
         DEBUG_SYNC();
@@ -525,7 +526,7 @@ void concat_levels(MemManager& mem, std::vector<Level>& levels, Grid& grid) {
 
     // Mark the cells at the leaves of the structure as kept
     auto kept_cells = mem.alloc<int>(Slot::KEPT_FLAGS, total_cells + 1);
-    for (int i = 0, cell_off = 0; i < levels.size(); cell_off += levels[i].num_cells, i++) {
+    for (int i = 0, cell_off = 0; i < num_levels; cell_off += levels[i].num_cells, i++) {
         int num_cells = levels[i].num_cells;
         mark_kept_cells<<<round_div(num_cells, 64), 64>>>(levels[i].entries, kept_cells + cell_off, num_cells);
         DEBUG_SYNC();
@@ -538,7 +539,7 @@ void concat_levels(MemManager& mem, std::vector<Level>& levels, Grid& grid) {
 
     // Allocate new cells, and copy only the cells that are kept
     auto cells = mem.alloc<Cell>(Slot::cell_array(num_levels), new_total_cells);
-    for (int i = 0, cell_off = 0; i < levels.size(); cell_off += levels[i].num_cells, i++) {
+    for (int i = 0, cell_off = 0; i < num_levels; cell_off += levels[i].num_cells, i++) {
         int num_cells = levels[i].num_cells;
         copy_cells<<<round_div(num_cells, 64), 64>>>(levels[i].cells, start_cell, cells, cell_off, num_cells);
         DEBUG_SYNC();
@@ -546,7 +547,7 @@ void concat_levels(MemManager& mem, std::vector<Level>& levels, Grid& grid) {
     }
 
     auto entries = mem.alloc<Entry>(Slot::entry_array(num_levels), total_cells);
-    for (int i = 0, off = 0; i < levels.size(); off += levels[i].num_cells, i++) {
+    for (int i = 0, off = 0; i < num_levels; off += levels[i].num_cells, i++) {
         int num_cells = levels[i].num_cells;
         int next_level_off = off + num_cells;
         copy_entries<<<round_div(num_cells, 64), 64>>>(levels[i].entries, start_cell, entries + off, off, next_level_off, num_cells);
@@ -563,7 +564,7 @@ void concat_levels(MemManager& mem, std::vector<Level>& levels, Grid& grid) {
     // Sort the references by cell
     auto tmp_ref_ids  = mem.alloc<int>(Slot::ref_array(num_levels + 2), total_refs);
     auto tmp_cell_ids = mem.alloc<int>(Slot::ref_array(num_levels + 3), total_refs); 
-    par.sort_pairs(ref_ids, cell_ids, tmp_ref_ids, tmp_cell_ids, total_refs);
+    par.sort_pairs(cell_ids, ref_ids, tmp_cell_ids, tmp_ref_ids, total_refs);
     if (ref_ids != tmp_ref_ids) {
         std::swap(tmp_ref_ids, ref_ids);
         mem.swap(Slot::ref_array(num_levels + 2), Slot::ref_array(num_levels + 0));
@@ -625,9 +626,9 @@ void build(MemManager& mem, const BuildParams& params, const Primitive* prims, i
     mem.free(Slot::BBOXES);
 
     concat_levels(mem, levels, grid);
-    grid.top_dims = dims;
-    grid.shift    = grid_shift;
-    grid.bbox     = grid_bb;
+    grid.dims  = dims;
+    grid.shift = grid_shift;
+    grid.bbox  = grid_bb;
 }
 
 void build_grid(MemManager& mem, const BuildParams& params, const Tri* tris, int num_tris, Grid& grid) { build(mem, params, tris, num_tris, grid); }

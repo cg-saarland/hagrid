@@ -41,7 +41,7 @@ struct Grid {
     Cell*  cells;       ///< Cells of the structure
 
     BBox bbox;          ///< Bounding box of the scene
-    ivec3 top_dims;     ///< Top-level dimensions
+    ivec3 dims;         ///< Top-level dimensions
     int shift;          ///< Maximum octree depth of all cells
     int num_cells;      ///< Number of cells
     int num_levels;     ///< Maximum depth of the voxel map
@@ -65,12 +65,12 @@ struct Range {
 /// Computes the range of cells that intersect the given box
 HOST DEVICE inline Range compute_range(const ivec3& dims, const BBox& grid_bb, const BBox& obj_bb) {
     auto inv = vec3(dims) / grid_bb.extents();
-    int lx = max((int)((obj_bb.min.x - grid_bb.min.x) * inv.x), 0);
-    int ly = max((int)((obj_bb.min.y - grid_bb.min.y) * inv.y), 0);
-    int lz = max((int)((obj_bb.min.z - grid_bb.min.z) * inv.z), 0);
-    int hx = min((int)((obj_bb.max.x - grid_bb.min.x) * inv.x), dims.x - 1);
-    int hy = min((int)((obj_bb.max.y - grid_bb.min.y) * inv.y), dims.y - 1);
-    int hz = min((int)((obj_bb.max.z - grid_bb.min.z) * inv.z), dims.z - 1);
+    int lx = max(int((obj_bb.min.x - grid_bb.min.x) * inv.x), 0);
+    int ly = max(int((obj_bb.min.y - grid_bb.min.y) * inv.y), 0);
+    int lz = max(int((obj_bb.min.z - grid_bb.min.z) * inv.z), 0);
+    int hx = min(int((obj_bb.max.x - grid_bb.min.x) * inv.x), dims.x - 1);
+    int hy = min(int((obj_bb.max.y - grid_bb.min.y) * inv.y), dims.y - 1);
+    int hz = min(int((obj_bb.max.z - grid_bb.min.z) * inv.z), dims.z - 1);
     return Range(lx, ly, lz, hx, hy, hz);
 }
 
