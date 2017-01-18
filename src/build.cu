@@ -97,7 +97,6 @@ template <bool first_iter, typename Primitive>
 __global__ void emit_new_refs(const Entry* __restrict__ entries,
                               const Cell*  __restrict__ cells,
                               const Primitive* __restrict__ prims,
-                              const BBox* __restrict__ bboxes,
                               const int* __restrict__ start_emit,
                               const int* __restrict__ ref_ids,
                               const int* __restrict__ cell_ids,
@@ -128,10 +127,10 @@ __global__ void emit_new_refs(const Entry* __restrict__ entries,
     }
 
     // Emit references for intersected cells
-    auto ref_bb = load_bbox(bboxes + ref);
+    auto prim = load_prim(prims + ref);
+    auto ref_bb = prim.bbox();
     auto range  = compute_range(dims, bbox, ref_bb);
     auto sub_size = bbox.extents() / vec3(dims);
-    auto prim = load_prim(prims + ref);
     auto start = start_emit[id + 0];
     auto end   = start_emit[id + 1];
     int x = range.lx;
@@ -458,8 +457,7 @@ bool build_iter(MemManager& mem, const BuildParams& params,
     auto new_ref_ids  = mem.alloc<int>(Slot::ref_array(cur_level), 2 * num_new_refs);
     auto new_cell_ids = new_ref_ids + num_new_refs;
     emit_new_refs<first_iter><<<round_div(num_split, 64), 64>>>(entries, cells,
-        prims, bboxes,
-        start_emit,
+        prims, start_emit,
         ref_ids + num_kept, cell_ids + num_kept,
         new_ref_ids, new_cell_ids,
         num_split);
