@@ -603,6 +603,10 @@ void build(MemManager& mem, const BuildParams& params, const Primitive* prims, i
     auto grid_bb = par.reduce(bboxes, num_prims, bboxes + num_prims,
         [] __device__ (BBox a, const BBox& b) { return a.extend(b); }, BBox::empty());
     auto dims = compute_grid_dims(grid_bb, num_prims, params.top_density);
+    // Round to the next multiple of 2 on each dimension (in order to align the memory)
+    dims.x = dims.x % 2 ? dims.x + 1 : dims.x;
+    dims.y = dims.y % 2 ? dims.y + 1 : dims.y;
+    dims.z = dims.z % 2 ? dims.z + 1 : dims.z;
     int level_shift = params.level_shift;
 
     // Slightly enlarge the bounding box of the grid

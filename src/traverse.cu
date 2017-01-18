@@ -53,7 +53,7 @@ __global__ void traverse_grid(const Entry* __restrict__ entries,
 
     while (true) {
         // Lookup entry
-        const int entry = lookup_entry(entries, grid_shift, grid_dims, voxel);
+        const int entry = lookup_entry(entries, grid_shift, grid_dims >> grid_shift, voxel);
 
         // Lookup the cell associated with this voxel
         auto cell = load_cell(cells + entry);
