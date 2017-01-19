@@ -77,6 +77,7 @@ struct ProgramOptions {
     float clip, fov;
     int build_iter;
     int build_warmup;
+    bool keep_alive;
     bool help;
 
     ProgramOptions()
@@ -87,6 +88,7 @@ struct ProgramOptions {
         , fov(60)
         , build_iter(1)
         , build_warmup(0)
+        , keep_alive(false)
         , help(false)
     {}
 
@@ -156,6 +158,8 @@ bool ProgramOptions::parse(int argc, char** argv) {
         } else if (matches(arg, "-wb", "--build-warmup")) {
             if (!arg_exists(argv, i, argc)) return false;
             build_warmup = strtol(argv[++i], nullptr, 10);
+        } else if (matches(arg, "-k", "--keep-alive")) {
+            keep_alive = true;
         } else {
             std::cerr << "unknown argument: " << arg << std::endl;
             return false;
@@ -256,7 +260,8 @@ static void usage() {
                  "  -e      --expansion     Sets the number of expansion passes\n"
                  "  -s      --shift         Sets the number of octree levels per subdivision iteration\n"
                  "  -nb     --build-iter    Sets the number of build iterations\n"
-                 "  -wb     --build-warmup  Sets the number of warmup build iterations" << std::endl;
+                 "  -wb     --build-warmup  Sets the number of warmup build iterations\n"
+                 "  -k      --keep-alive    Keeps the buffers alive during construction\n" << std::endl;
 }
 
 int main(int argc, char** argv) {
@@ -286,7 +291,7 @@ int main(int argc, char** argv) {
 
     std::cout << host_tris.size() << " triangle(s)" << std::endl;
 
-    MemManager mem((opts.build_iter + opts.build_warmup) > 1);
+    MemManager mem(opts.keep_alive);
     auto tris = mem.alloc<Tri>(host_tris.size());
     mem.copy<Copy::HST_TO_DEV>(tris, host_tris.data(), host_tris.size());
 

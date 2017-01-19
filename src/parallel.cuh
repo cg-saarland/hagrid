@@ -60,7 +60,7 @@ public:
     int partition(InputIt values, OutputIt result, int n, FlagIt flags) {
         size_t required_bytes;
         CHECK_CUDA_CALL(cub::DevicePartition::Flagged(nullptr, required_bytes, values, flags, result, (int*)nullptr, n));
-        required_bytes += 4 - required_bytes % 4; // Align storage  
+        required_bytes += 4 - required_bytes % 4; // Align storage
         char* tmp_storage = mem_.alloc<char>(Slot::TMP_STORAGE, required_bytes + sizeof(int));
         int* count_ptr = reinterpret_cast<int*>(tmp_storage + required_bytes);
         CHECK_CUDA_CALL(cub::DevicePartition::Flagged(tmp_storage, required_bytes, values, flags, result, count_ptr, n));

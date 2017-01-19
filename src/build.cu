@@ -38,7 +38,6 @@ static __constant__ ivec3 grid_dims;
 static __constant__ BBox  grid_bbox;
 static __constant__ vec3  cell_size;
 static __constant__ int   grid_shift;
-static __constant__ int   level_shift;
 
 /// Compute the bounding box of every primitive
 template <typename Primitive>
@@ -55,97 +54,173 @@ __global__ void compute_bboxes(const Primitive* __restrict__ prims,
 
 /// Compute an over-approximation of the number of references
 /// that are going to be generated during reference emission
-template <bool first_iter>
-__global__ void count_new_refs(const Entry* __restrict__ entries,
-                               const Cell*  __restrict__ cells,
-                               const BBox*  __restrict__ bboxes,
-                               const int*  __restrict__ ref_ids,
-                               const int*  __restrict__ cell_ids,
+__global__ void count_new_refs(const BBox*  __restrict__ bboxes,
                                int*        __restrict__ counts,
                                int num_refs) {
     int id = threadIdx.x + blockDim.x * blockIdx.x;
     if (id >= num_refs) return;
 
-    auto ref = first_iter ? id : ref_ids[id];
-    if (!first_iter && ref < 0) {
-        // Deal with invalid references here
-        counts[id] = 0;
-        return;
-    }
-
-    BBox bbox;
-    ivec3 dims;
-    if (!first_iter) {
-        auto cell_id = cell_ids[id];
-        auto entry = entries[cell_id];
-        auto cell = load_cell(cells + cell_id);
-        bbox = BBox(grid_bbox.min + vec3(cell.min) * cell_size,
-                    grid_bbox.min + vec3(cell.max) * cell_size);
-        dims = ivec3(1 << entry.log_dim);
-    } else {
-        dims = grid_dims;
-        bbox = grid_bbox;
-    }
-
-    auto ref_bb = load_bbox(bboxes + ref);
-    auto range  = compute_range(dims, bbox, ref_bb);
+    auto ref_bb = load_bbox(bboxes + id);
+    auto range  = compute_range(grid_dims, grid_bbox, ref_bb);
     counts[id]  = max(0, range.size());
 }
 
 /// Emit the new references by inserting existing ones into the sub-levels
-template <bool first_iter, typename Primitive>
-__global__ void emit_new_refs(const Entry* __restrict__ entries,
-                              const Cell*  __restrict__ cells,
-                              const Primitive* __restrict__ prims,
-                              const int* __restrict__ start_emit,
-                              const int* __restrict__ ref_ids,
-                              const int* __restrict__ cell_ids,
-                              int* __restrict__ new_ref_ids,
-                              int* __restrict__ new_cell_ids,
-                              int num_refs) {
+__global__ void __launch_bounds__(64)
+emit_new_refs(const BBox* __restrict__ bboxes,
+              const int* __restrict__ start_emit,
+              int* __restrict__ new_ref_ids,
+              int* __restrict__ new_cell_ids,
+              int num_prims) {
+    int id = threadIdx.x + blockDim.x * blockIdx.x;
+
+    Range range;
+    int start = 0, end = 0;
+
+    if (id < num_prims) {
+        start = start_emit[id + 0];
+        end   = start_emit[id + 1];
+
+        if (start < end) {
+            auto ref_bb = load_bbox(bboxes + id);
+            range  = compute_range(grid_dims, grid_bbox, ref_bb);
+        }
+    }
+
+    bool blocked = (end - start) >= 16;
+    if (!blocked && start < end) {
+        int x = range.lx;
+        int y = range.ly;
+        int z = range.lz;
+        int cur = start;
+        while (cur < end) {
+            new_ref_ids [cur] = id;
+            new_cell_ids[cur] = x + grid_dims.x * (y + grid_dims.y * z);
+            cur++;
+            x++;
+            if (x > range.hx) { x = range.lx; y++; }
+            if (y > range.hy) { y = range.ly; z++; }
+        }
+    }
+
+    int mask = __ballot(blocked);
+    while (mask) {
+        int bit = __ffs(mask) - 1;
+        mask &= ~(1 << bit);
+
+        int warp_start = __shfl(start, bit);
+        int warp_end   = __shfl(end,   bit);
+        int warp_id    = threadIdx.x - __shfl(threadIdx.x, 0);
+
+        int lx = __shfl(range.lx, bit);
+        int ly = __shfl(range.ly, bit);
+        int lz = __shfl(range.lz, bit);
+        int hx = __shfl(range.hx, bit);
+        int hy = __shfl(range.hy, bit);
+        int r  = __shfl(id, bit);
+
+        int sx = hx - lx + 1;
+        int sy = hy - ly + 1;
+
+        // Split the work on all the threads of the warp
+        for (int i = warp_start + warp_id; i < warp_end; i += 32) {
+            int k = i - warp_start;
+            int x = lx + (k % sx);
+            int y = ly + ((k / sx) % sy);
+            int z = lz + (k / (sx * sy));
+            new_ref_ids[i]  = r;
+            new_cell_ids[i] = x + grid_dims.x * (y + grid_dims.y * z);
+        }
+    }
+}
+
+/// Filter out references that do not intersect the cell they are in
+template <typename Primitive>
+__global__ void filter_refs(int* __restrict__ cell_ids,
+                            int* __restrict__ ref_ids,
+                            const Primitive* __restrict__ prims,
+                            const Cell* __restrict__ cells,
+                            int num_refs) {
     int id = threadIdx.x + blockDim.x * blockIdx.x;
     if (id >= num_refs) return;
 
-    auto ref = first_iter ? id : ref_ids[id];
-    if (!first_iter && ref < 0) return;
-
-    BBox bbox;
-    ivec3 dims;
-    int cur_cell;
-    if (!first_iter) {
-        auto cell_id = cell_ids[id];
-        auto entry = entries[cell_id];
-        auto cell = load_cell(cells + cell_id);
-        cur_cell = entry.begin;
-        bbox = BBox(grid_bbox.min + vec3(cell.min) * cell_size,
-                    grid_bbox.min + vec3(cell.max) * cell_size);
-        dims = ivec3(1 << entry.log_dim);
-    } else {
-        cur_cell = 0;
-        dims = grid_dims;
-        bbox = grid_bbox;
+    auto cell = load_cell(cells + cell_ids[id]);
+    auto prim = load_prim(prims +  ref_ids[id]);
+    auto bbox = BBox(grid_bbox.min + vec3(cell.min) * cell_size,
+                     grid_bbox.min + vec3(cell.max) * cell_size);
+    bool intersect = intersect_prim_box(prim, bbox);
+    if (!intersect) {
+        cell_ids[id] = -1;
+        ref_ids[id]  = -1;
     }
+}
 
-    // Emit references for intersected cells
-    auto prim = load_prim(prims + ref);
-    auto ref_bb = prim.bbox();
-    auto range  = compute_range(dims, bbox, ref_bb);
-    auto sub_size = bbox.extents() / vec3(dims);
-    auto start = start_emit[id + 0];
-    auto end   = start_emit[id + 1];
-    int x = range.lx;
-    int y = range.ly;
-    int z = range.lz;
-    while (start < end) {
-        auto sub_bb = BBox(bbox.min + sub_size * vec3(x + 0, y + 0, z + 0),
-                           bbox.min + sub_size * vec3(x + 1, y + 1, z + 1));
-        bool intersect = intersect_prim_box(prim, sub_bb);
-        new_ref_ids [start] = !intersect ? -1 : ref;
-        new_cell_ids[start] = !intersect ? -1 : cur_cell + x + dims.x * (y + dims.y * z);
+/// Compute a mask for each reference which determines which sub-cell is intersected
+template <typename Primitive>
+__global__ void compute_split_masks(const int* __restrict__ cell_ids,
+                                    const int* __restrict__ ref_ids,
+                                    const Primitive* __restrict__ prims,
+                                    const Cell* __restrict__ cells,
+                                    int* split_masks,
+                                    int num_split) {
+    int id = threadIdx.x + blockDim.x * blockIdx.x;
+    int split_id = id / 8;
+    int child_id = id % 8;
+    if (split_id >= num_split) return;
+
+    auto cell_id = cell_ids[split_id];
+    if (cell_id < 0) {
+        if (child_id == 0) split_masks[split_id] = 0;
+        return;
+    }
+    auto ref     =  ref_ids[split_id];
+    auto cell    = load_cell(cells + cell_id);
+    auto prim    = load_prim(prims + ref);
+
+    auto middle = (cell.min + cell.max) / 2;
+    auto child_min = grid_bbox.min + cell_size *
+                     vec3(child_id & 1 ? middle.x : cell.min.x,
+                          child_id & 2 ? middle.y : cell.min.y,
+                          child_id & 4 ? middle.z : cell.min.z);
+    auto child_max = grid_bbox.min + cell_size *
+                     vec3(child_id & 1 ? cell.max.x : middle.x,
+                          child_id & 2 ? cell.max.y : middle.y,
+                          child_id & 4 ? cell.max.z : middle.z);
+    BBox bbox(child_min, child_max);
+
+    bool intersect = intersect_prim_box(prim, bbox);
+
+    int mask = intersect ? 1 << child_id : 0;
+    mask |= __shfl_down(mask, 4);
+    mask |= __shfl_down(mask, 2);
+    mask |= __shfl_down(mask, 1);
+    if (child_id == 0) split_masks[split_id] = mask;
+}
+
+/// Compute a mask for each reference which determines which sub-cell is intersected
+__global__ void split_refs(const int* __restrict__ cell_ids,
+                           const int* __restrict__ ref_ids,
+                           const Entry* __restrict__ entries,
+                           const int* __restrict__ split_masks,
+                           const int* __restrict__ start_split,
+                           int* __restrict__ new_cell_ids,
+                           int* __restrict__ new_ref_ids,
+                           int num_split) {
+    int id = threadIdx.x + blockDim.x * blockIdx.x;
+    if (id >= num_split) return;
+
+    auto cell_id = cell_ids[id];
+    auto ref = ref_ids[id];
+    auto begin = entries[cell_id].begin;
+
+    auto mask  = split_masks[id];
+    auto start = start_split[id];
+    while (mask) {
+        int child_id = __ffs(mask) - 1;
+        mask &= ~(1 << child_id);
+        new_ref_ids [start] = ref;
+        new_cell_ids[start] = begin + child_id;
         start++;
-        x++;
-        if (x > range.hx) { x = range.lx; y++; }
-        if (y > range.hy) { y = range.ly; z++; }
     }
 }
 
@@ -181,7 +256,7 @@ __global__ void update_log_dims(int* __restrict__ log_dims, int num_top_cells) {
     int id = threadIdx.x + blockDim.x * blockIdx.x;
     if (id >= num_top_cells) return;
 
-    log_dims[id] = max(0, log_dims[id] - level_shift);
+    log_dims[id] = max(0, log_dims[id] - 1);
 }
 
 /// Given a position on the virtual grid, return the corresponding top-level cell index
@@ -205,7 +280,7 @@ __global__ void compute_dims(const int*  __restrict__ cell_ids,
     auto top_cell_id = top_level_cell(cell_min);
     auto log_dim = log_dims[top_cell_id];
 
-    entries[cell_id] = Entry(min(log_dim, level_shift), 0);
+    entries[cell_id] = Entry(min(log_dim, 1), 0);
 }
 
 /// Mark references that are kept so that they can be moved to the beginning of the array
@@ -235,8 +310,29 @@ __global__ void update_entries(const int* __restrict__ start_cell,
     entries[id] = entry;
 }
 
+/// Generate cells for the top level
+__global__ void emit_top_cells(Cell* __restrict__ new_cells, int num_cells) {
+    int id = threadIdx.x + blockDim.x * blockIdx.x;
+    if (id >= num_cells) return;
+
+    int x = id % grid_dims.x;
+    int y = (id / grid_dims.x) % grid_dims.y;
+    int z = id / (grid_dims.x * grid_dims.y);
+    int inc = 1 << grid_shift;
+
+    x <<= grid_shift;
+    y <<= grid_shift;
+    z <<= grid_shift;
+
+    Cell cell;
+    cell.min = ivec3(x, y, z);
+    cell.max = ivec3(x + inc, y + inc, z + inc);
+    cell.begin = 0;
+    cell.end   = 0;
+    store_cell(new_cells + id, cell);
+}
+
 /// Generate new cells based on the previous level
-template <bool first_iter>
 __global__ void emit_new_cells(const Entry* __restrict__ entries,
                                const Cell* __restrict__ cells,
                                Cell* __restrict__ new_cells,
@@ -244,48 +340,27 @@ __global__ void emit_new_cells(const Entry* __restrict__ entries,
     int id = threadIdx.x + blockDim.x * blockIdx.x;
     if (id >= num_cells) return;
 
-    if (first_iter) {
-        int x = id % grid_dims.x;
-        int y = (id / grid_dims.x) % grid_dims.y;
-        int z = id / (grid_dims.x * grid_dims.y);
-        int inc = 1 << grid_shift;
+    auto entry = entries[id];
+    auto log_dim = entry.log_dim;
+    if (log_dim == 0) return;
 
-        x <<= grid_shift;
-        y <<= grid_shift;
-        z <<= grid_shift;
+    auto start = entry.begin;
+    auto cell = load_cell(cells + id);
+    int min_x = cell.min.x;
+    int min_y = cell.min.y;
+    int min_z = cell.min.z;
+    int inc = (cell.max.x - cell.min.x) >> 1;
 
-        Cell cell;
+    for (int i = 0; i < 8; i++) {
+        int x = min_x + (i & 1) * inc;
+        int y = min_y + ((i >> 1) & 1) * inc;
+        int z = min_z + (i >> 2) * inc;
+
         cell.min = ivec3(x, y, z);
         cell.max = ivec3(x + inc, y + inc, z + inc);
         cell.begin = 0;
         cell.end   = 0;
-        store_cell(new_cells + id, cell);
-    } else {
-        auto entry = entries[id];
-        auto log_dim = entry.log_dim;
-        if (log_dim == 0) return;
-
-        auto start = entry.begin;
-        auto n = 1 << (3 * log_dim);
-
-        auto cell = load_cell(cells + id);
-        int min_x = cell.min.x;
-        int min_y = cell.min.y;
-        int min_z = cell.min.z;
-        int inc = (cell.max.x - cell.min.x) >> log_dim;
-        int mask = (1 << log_dim) - 1;
-
-        for (int i = 0; i < n; i++) {
-            int x = min_x + (i & mask) * inc;
-            int y = min_y + ((i >> log_dim) & mask) * inc;
-            int z = min_z + (i >> (2 * log_dim)) * inc;
-
-            cell.min = ivec3(x, y, z);
-            cell.max = ivec3(x + inc, y + inc, z + inc);
-            cell.begin = 0;
-            cell.end   = 0;
-            store_cell(new_cells + start + i, cell);
-        }
+        store_cell(new_cells + start + i, cell);
     }
 }
 
@@ -374,121 +449,151 @@ __global__ void compute_cell_ranges(const int* cell_ids, Cell* cells, int num_re
     }
 }
 
-template <bool first_iter, typename Primitive>
-bool build_iter(MemManager& mem, const BuildParams& params,
-                const Primitive* prims, int num_prims,
-                const BBox* bboxes, const BBox& grid_bb, const ivec3& dims,
-                int*& log_dims, int& grid_shift, std::vector<Level>& levels) {
+template <typename Primitive>
+void first_build_iter(MemManager& mem, const BuildParams& params,
+                      const Primitive* prims, int num_prims,
+                      const BBox* bboxes, const BBox& grid_bb, const ivec3& dims,
+                      int*& log_dims, int& grid_shift, std::vector<Level>& levels) {
     Parallel par(mem);
 
-    int* cell_ids  = first_iter ? nullptr : levels.back().cell_ids;
-    int* ref_ids   = first_iter ? nullptr : levels.back().ref_ids;
-    Cell* cells    = first_iter ? nullptr : levels.back().cells;
-    Entry* entries = first_iter ? nullptr : levels.back().entries;
+    int num_top_cells = dims.x * dims.y * dims.z;
+
+    // Emission of the references in 4 passes: count new refs + scan + emission + filtering
+    auto start_emit     = mem.alloc<int>(Slot::START_EMIT,     num_prims + 1);
+    auto new_ref_counts = mem.alloc<int>(Slot::NEW_REF_COUNTS, num_prims + 1);
+    auto refs_per_cell  = mem.alloc<int>(Slot::REFS_PER_CELL,  num_top_cells);
+    log_dims            = mem.alloc<int>(Slot::LOG_DIMS,       num_top_cells + 1);
+    count_new_refs<<<round_div(num_prims, 64), 64>>>(bboxes, new_ref_counts, num_prims);
+    DEBUG_SYNC();
+
+    int num_new_refs = par.scan(new_ref_counts, num_prims + 1, start_emit);
+    mem.free(Slot::NEW_REF_COUNTS);
+
+    auto new_ref_ids  = mem.alloc<int>(Slot::ref_array(0), 2 * num_new_refs);
+    auto new_cell_ids = new_ref_ids + num_new_refs;
+    emit_new_refs<<<round_div(num_prims, 64), 64>>>(bboxes, start_emit, new_ref_ids, new_cell_ids, num_prims);
+    DEBUG_SYNC();
+
+    mem.free(Slot::START_EMIT);
+
+    // Compute the number of references per cell
+    mem.zero(refs_per_cell, num_top_cells);
+    count_refs_per_cell<<<round_div(num_new_refs, 64), 64>>>(new_cell_ids, refs_per_cell, num_new_refs);
+    DEBUG_SYNC();
+
+    // Compute an independent resolution in each of the top-level cells
+    compute_log_dims<<<round_div(num_top_cells, 64), 64>>>(refs_per_cell, log_dims, params.snd_density, num_top_cells);
+    DEBUG_SYNC();
+    mem.free(Slot::REFS_PER_CELL);
+
+    // Find the maximum sub-level resolution
+    grid_shift = par.reduce(log_dims, num_top_cells, log_dims + num_top_cells, [] __device__ (int a, int b) { return max(a, b); });
+    auto cell_size = grid_bb.extents() / vec3(dims << grid_shift);
+
+    set_global(hagrid::grid_shift, &grid_shift);
+    set_global(hagrid::cell_size,  &cell_size);
+
+    // Emission of the new cells
+    auto new_cells   = mem.alloc<Cell >(Slot::cell_array(0),  num_top_cells + 0);
+    auto new_entries = mem.alloc<Entry>(Slot::entry_array(0), num_top_cells + 1);
+    emit_top_cells<<<round_div(num_top_cells, 64), 64>>>(new_cells, num_top_cells);
+    DEBUG_SYNC();
+    mem.zero(new_entries, num_top_cells + 1);
+
+    // Filter out the references that do not intersect the cell they are in
+    filter_refs<<<round_div(num_new_refs, 64), 64>>>(new_cell_ids, new_ref_ids, prims, new_cells, num_new_refs);
+
+    levels.emplace_back(new_ref_ids, new_cell_ids, num_new_refs, num_new_refs, new_cells, new_entries, num_top_cells);
+}
+
+template <typename Primitive>
+bool build_iter(MemManager& mem, const BuildParams& params,
+                const Primitive* prims, int num_prims,
+                const BBox* bboxes, const ivec3& dims,
+                int* log_dims, std::vector<Level>& levels) {
+    Parallel par(mem);
+
+    int* cell_ids  = levels.back().cell_ids;
+    int* ref_ids   = levels.back().ref_ids;
+    Cell* cells    = levels.back().cells;
+    Entry* entries = levels.back().entries;
 
     int num_top_cells = dims.x * dims.y * dims.z;
-    int num_refs  = first_iter ? num_prims     : levels.back().num_refs;
-    int num_cells = first_iter ? num_top_cells : levels.back().num_cells;
+    int num_refs  = levels.back().num_refs;
+    int num_cells = levels.back().num_cells;
 
-    int cur_level = levels.size();
+    int cur_level  = levels.size();
     int prev_level = cur_level - 1;
 
-    int num_new_cells = num_top_cells;
-    int* start_cell = nullptr;
-    int num_kept  = 0;
-    if (!first_iter) {
-        auto kept_flags = mem.alloc<int>(Slot::KEPT_FLAGS, num_refs);
+    auto kept_flags = mem.alloc<int>(Slot::KEPT_FLAGS, num_refs + 1);
 
-        // Find out which cell will be split based on whether it is empty or not and the maximum depth
-        compute_dims<<<round_div(num_refs, 64), 64>>>(cell_ids, cells, log_dims, entries, num_refs);
-        DEBUG_SYNC();
-        update_log_dims<<<round_div(num_top_cells, 64), 64>>>(log_dims, num_top_cells);
-        DEBUG_SYNC();
-        mark_kept_refs<<<round_div(num_refs, 64), 64>>>(cell_ids, entries, kept_flags, num_refs);
-        DEBUG_SYNC();
+    // Find out which cell will be split based on whether it is empty or not and the maximum depth
+    compute_dims<<<round_div(num_refs, 64), 64>>>(cell_ids, cells, log_dims, entries, num_refs);
+    DEBUG_SYNC();
+    update_log_dims<<<round_div(num_top_cells, 64), 64>>>(log_dims, num_top_cells);
+    DEBUG_SYNC();
+    mark_kept_refs<<<round_div(num_refs, 64), 64>>>(cell_ids, entries, kept_flags, num_refs);
+    DEBUG_SYNC();
 
-        // Store the sub-cells starting index in the entries
-        start_cell = mem.alloc<int>(Slot::START_CELL, num_cells + 1);
-        num_new_cells = par.scan(par.transform(entries, [] __device__ (Entry e) {
-            return e.log_dim == 0 ? 0 : 1 << (e.log_dim * 3);
-        }), num_cells + 1, start_cell);
-        update_entries<<<round_div(num_cells, 64), 64>>>(start_cell, entries, num_cells);
-        DEBUG_SYNC();
+    // Store the sub-cells starting index in the entries
+    auto start_cell = mem.alloc<int>(Slot::START_CELL, num_cells + 1);
+    int num_new_cells = par.scan(par.transform(entries, [] __device__ (Entry e) {
+        return e.log_dim == 0 ? 0 : 8;
+    }), num_cells + 1, start_cell);
+    update_entries<<<round_div(num_cells, 64), 64>>>(start_cell, entries, num_cells);
+    DEBUG_SYNC();
 
-        mem.free(Slot::START_CELL);
+    mem.free(Slot::START_CELL);
 
-        // Partition the set of cells into the sets of those which will be split and those which won't
-        auto tmp_ref_ids  = mem.alloc<int>(Slot::ref_array(cur_level), num_refs * 2);
-        auto tmp_cell_ids = tmp_ref_ids + num_refs;
-        int num_sel_refs  = par.partition(ref_ids,  tmp_ref_ids,  num_refs, kept_flags);
-        int num_sel_cells = par.partition(cell_ids, tmp_cell_ids, num_refs, kept_flags);
-        assert(num_sel_refs == num_sel_cells);
+    // Partition the set of cells into the sets of those which will be split and those which won't
+    auto tmp_ref_ids  = mem.alloc<int>(Slot::ref_array(cur_level), num_refs * 2);
+    auto tmp_cell_ids = tmp_ref_ids + num_refs;
+    int num_sel_refs  = par.partition(ref_ids,  tmp_ref_ids,  num_refs, kept_flags);
+    int num_sel_cells = par.partition(cell_ids, tmp_cell_ids, num_refs, kept_flags);
+    assert(num_sel_refs == num_sel_cells);
+    mem.free(Slot::KEPT_FLAGS);
 
-        std::swap(tmp_ref_ids,  ref_ids);
-        std::swap(tmp_cell_ids, cell_ids);
-        mem.swap(Slot::ref_array(cur_level), Slot::ref_array(prev_level));
-        mem.free(Slot::ref_array(cur_level));
-        mem.free(Slot::KEPT_FLAGS);
+    std::swap(tmp_ref_ids,  ref_ids);
+    std::swap(tmp_cell_ids, cell_ids);
+    mem.swap(Slot::ref_array(cur_level), Slot::ref_array(prev_level));
+    mem.free(Slot::ref_array(cur_level));
 
-        num_kept = num_sel_refs;
-        levels.back().ref_ids  = ref_ids;
-        levels.back().cell_ids = cell_ids;
-        levels.back().num_kept = num_kept;
-    }
+    int num_kept = num_sel_refs;
+    levels.back().ref_ids  = ref_ids;
+    levels.back().cell_ids = cell_ids;
+    levels.back().num_kept = num_kept;
 
     if (num_new_cells == 0) {
         // Exit here because no new reference will be emitted
         mem.free(Slot::LOG_DIMS);
-        log_dims = nullptr;
         return false;
     }
 
     int num_split = num_refs - num_kept;
 
-    // Emission of the references in 3 passes: count new refs + scan + emission 
-    auto start_emit     = mem.alloc<int>(Slot::START_EMIT,     num_split + 1);
-    auto new_ref_counts = mem.alloc<int>(Slot::NEW_REF_COUNTS, num_split + 1);
-    count_new_refs<first_iter><<<round_div(num_refs, 64), 64>>>(entries, cells, bboxes, ref_ids + num_kept, cell_ids + num_kept, new_ref_counts, num_split);
+    // Split the references
+    auto split_masks = mem.alloc<int>(Slot::SPLIT_MASKS, num_split + 1);
+    auto start_split = mem.alloc<int>(Slot::START_SPLIT, num_split + 1);
+    compute_split_masks<<<round_div(num_split * 8, 64), 64>>>(cell_ids + num_kept, ref_ids + num_kept, prims, cells, split_masks, num_split);
     DEBUG_SYNC();
 
-    int num_new_refs = par.scan(new_ref_counts, num_split + 1, start_emit);
-    mem.free(Slot::NEW_REF_COUNTS);
+    int num_new_refs = par.scan(par.transform(split_masks, [] __device__ (int mask) {
+        return __popc(mask);
+    }), num_split + 1, start_split);
+    assert(num_new_refs <= 8 * num_split);
 
-    auto new_ref_ids  = mem.alloc<int>(Slot::ref_array(cur_level), 2 * num_new_refs);
+    auto new_ref_ids = mem.alloc<int>(Slot::ref_array(cur_level), num_new_refs * 2);
     auto new_cell_ids = new_ref_ids + num_new_refs;
-    emit_new_refs<first_iter><<<round_div(num_split, 64), 64>>>(entries, cells,
-        prims, start_emit,
-        ref_ids + num_kept, cell_ids + num_kept,
-        new_ref_ids, new_cell_ids,
-        num_split);
+    split_refs<<<round_div(num_split, 64), 64>>>(cell_ids + num_kept, ref_ids + num_kept, entries, split_masks, start_split, new_cell_ids, new_ref_ids, num_split);
     DEBUG_SYNC();
 
-    mem.free(Slot::START_EMIT);
-
-    if (first_iter) {
-        auto refs_per_cell = mem.alloc<int>(Slot::REFS_PER_CELL, num_top_cells);
-        mem.zero(refs_per_cell, num_top_cells);
-        count_refs_per_cell<<<round_div(num_new_refs, 64), 64>>>(new_cell_ids, refs_per_cell, num_new_refs);
-        DEBUG_SYNC();
-
-        // Compute an independent resolution in each of the top-level cells
-        log_dims = mem.alloc<int>(Slot::LOG_DIMS, num_top_cells + 1);
-        compute_log_dims<<<round_div(num_top_cells, 64), 64>>>(refs_per_cell, log_dims, params.snd_density, num_top_cells);
-        DEBUG_SYNC();
-        mem.free(Slot::REFS_PER_CELL);
-
-        // Find the maximum resolution
-        grid_shift = par.reduce(log_dims, num_top_cells, log_dims + num_top_cells, [] __device__ (int a, int b) { return max(a, b); });
-        auto cell_size = grid_bb.extents() / vec3(dims << grid_shift);
-
-        set_global(hagrid::grid_shift, &grid_shift);
-        set_global(hagrid::cell_size,  &cell_size);
-    }
+    mem.free(Slot::SPLIT_MASKS);
+    mem.free(Slot::START_SPLIT);
 
     // Emission of the new cells
     auto new_cells   = mem.alloc<Cell >(Slot::cell_array(cur_level),  num_new_cells + 0);
     auto new_entries = mem.alloc<Entry>(Slot::entry_array(cur_level), num_new_cells + 1);
-    emit_new_cells<first_iter><<<round_div(num_cells, 64), 64>>>(entries, cells, new_cells, num_cells);
+    emit_new_cells<<<round_div(num_cells, 64), 64>>>(entries, cells, new_cells, num_cells);
     DEBUG_SYNC();
     mem.zero(new_entries, num_new_cells + 1);
 
@@ -510,15 +615,17 @@ void concat_levels(MemManager& mem, std::vector<Level>& levels, Grid& grid) {
 
     // Copy primitive references as-is
     auto ref_ids = mem.alloc<int>(Slot::ref_array(num_levels + 0), total_refs);
+    auto cell_ids = mem.alloc<int>(Slot::ref_array(num_levels + 1), total_refs);
     for (int i = 0, off = 0; i < num_levels; off += levels[i].num_kept, i++) {
         mem.copy<Copy::DEV_TO_DEV>(ref_ids + off, levels[i].ref_ids, levels[i].num_kept);
     }
     // Copy the cell indices with an offset
-    auto cell_ids = mem.alloc<int>(Slot::ref_array(num_levels + 1), total_refs);
     for (int i = 0, off = 0, cell_off = 0; i < num_levels; off += levels[i].num_kept, cell_off += levels[i].num_cells, i++) {
         int num_kept = levels[i].num_kept;
-        copy_refs<<<round_div(num_kept, 64), 64>>>(levels[i].cell_ids, cell_ids + off, cell_off, num_kept);
-        DEBUG_SYNC();
+        if (num_kept) {
+            copy_refs<<<round_div(num_kept, 64), 64>>>(levels[i].cell_ids, cell_ids + off, cell_off, num_kept);
+            DEBUG_SYNC();
+        }
         mem.free(Slot::ref_array(i));
     }
 
@@ -605,14 +712,12 @@ void build(MemManager& mem, const BuildParams& params, const Primitive* prims, i
     dims.x = dims.x % 2 ? dims.x + 1 : dims.x;
     dims.y = dims.y % 2 ? dims.y + 1 : dims.y;
     dims.z = dims.z % 2 ? dims.z + 1 : dims.z;
-    int level_shift = params.level_shift;
 
     // Slightly enlarge the bounding box of the grid
     auto extents = grid_bb.extents();
     grid_bb.min -= extents * 0.001f;
     grid_bb.max += extents * 0.001f;
 
-    set_global(hagrid::level_shift, &level_shift);
     set_global(hagrid::grid_dims, &dims);
     set_global(hagrid::grid_bbox, &grid_bb);
 
@@ -621,10 +726,10 @@ void build(MemManager& mem, const BuildParams& params, const Primitive* prims, i
     std::vector<Level> levels;
 
     // Build top level
-    build_iter<true>(mem, params, prims, num_prims, bboxes, grid_bb, dims, log_dims, grid_shift, levels);
+    first_build_iter(mem, params, prims, num_prims, bboxes, grid_bb, dims, log_dims, grid_shift, levels);
 
     int iter = 1;
-    while (build_iter<false>(mem, params, prims, num_prims, bboxes, grid_bb, dims, log_dims, grid_shift, levels)) iter++;
+    while (build_iter(mem, params, prims, num_prims, bboxes,  dims, log_dims, levels)) iter++;
     mem.free(Slot::BBOXES);
 
     concat_levels(mem, levels, grid);
