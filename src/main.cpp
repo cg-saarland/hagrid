@@ -249,19 +249,19 @@ bool handle_events(View& view, bool& display_mode) {
 static void usage() {
     std::cout << "usage: hagrid [options] file\n"
                  "options:\n"
-                 "  -h      --help          Shows this message\n"
-                 "  -sx     --width         Sets the viewport width\n"
-                 "  -sy     --height        Sets the viewport height\n"
-                 "  -c      --clip          Sets the clipping distance\n"
-                 "  -f      --fov           Sets the field of view\n"
-                 "  -td     --top-density   Sets the top-level density\n"
-                 "  -sd     --snd-density   Sets the second-level density\n"
-                 "  -a      --alpha         Sets the ratio that controls cell merging\n"
-                 "  -e      --expansion     Sets the number of expansion passes\n"
-                 "  -s      --shift         Sets the number of octree levels per subdivision iteration\n"
-                 "  -nb     --build-iter    Sets the number of build iterations\n"
-                 "  -wb     --build-warmup  Sets the number of warmup build iterations\n"
-                 "  -k      --keep-alive    Keeps the buffers alive during construction\n" << std::endl;
+                 "  -h      --help          shows this message\n"
+                 "  -sx     --width         sets the viewport width\n"
+                 "  -sy     --height        sets the viewport height\n"
+                 "  -c      --clip          sets the clipping distance\n"
+                 "  -f      --fov           sets the field of view\n"
+                 "  -td     --top-density   sets the top-level density\n"
+                 "  -sd     --snd-density   sets the second-level density\n"
+                 "  -a      --alpha         sets the ratio that controls cell merging\n"
+                 "  -e      --expansion     sets the number of expansion passes\n"
+                 "  -s      --shift         sets the number of octree levels per subdivision iteration\n"
+                 "  -nb     --build-iter    sets the number of build iterations\n"
+                 "  -wb     --build-warmup  sets the number of warmup build iterations\n"
+                 "  -k      --keep-alive    keeps the buffers alive during construction\n" << std::endl;
 }
 
 int main(int argc, char** argv) {
@@ -311,7 +311,7 @@ int main(int argc, char** argv) {
         total_time += kernel_time;
     }
     auto dims = grid.dims << grid.shift;
-    std::cout << "Grid built in " << total_time / opts.build_iter << " ms ("
+    std::cout << "grid built in " << total_time / opts.build_iter << " ms ("
               << dims.x << "x" << dims.y << "x" << dims.z << ", "
               << grid.num_cells << " cells, " << grid.num_refs << " references)" << std::endl;
 
@@ -320,17 +320,17 @@ int main(int argc, char** argv) {
     const size_t refs_mem = grid.num_refs * sizeof(int);
     const size_t tris_mem = host_tris.size() * sizeof(Tri);
     const size_t total_mem = cells_mem + entries_mem + refs_mem + tris_mem;
-    std::cout << "Total memory: " << total_mem / double(1024 * 1024) << " MB" << std::endl;
-    std::cout << "Cells: " << cells_mem / double(1024 * 1024) << " MB" << std::endl;
-    std::cout << "Entries: " << entries_mem / double(1024 * 1024) << " MB" << std::endl;
-    std::cout << "References: " << refs_mem / double(1024 * 1024) << " MB" << std::endl;
-    std::cout << "Triangles: " << tris_mem / double(1024 * 1024) << " MB" << std::endl;
-    std::cout << "Peak usage: " << mem.peak_usage() / double(1024.0 * 1024.0) << " MB" << std::endl;
+    std::cout << "total memory: " << total_mem / double(1024 * 1024) << " MB" << std::endl;
+    std::cout << "cells: " << cells_mem / double(1024 * 1024) << " MB" << std::endl;
+    std::cout << "entries: " << entries_mem / double(1024 * 1024) << " MB" << std::endl;
+    std::cout << "references: " << refs_mem / double(1024 * 1024) << " MB" << std::endl;
+    std::cout << "triangles: " << tris_mem / double(1024 * 1024) << " MB" << std::endl;
+    std::cout << "peak usage: " << mem.peak_usage() / double(1024.0 * 1024.0) << " MB" << std::endl;
 
     setup_traversal(grid);
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-        std::cerr << "Cannot initialize SDL." << std::endl;
+        std::cerr << "cannot initialize SDL" << std::endl;
         return 1;
     }
 
