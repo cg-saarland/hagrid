@@ -148,7 +148,7 @@ __global__ void filter_refs(int* __restrict__ cell_ids,
     auto prim = load_prim(prims +  ref_ids[id]);
     auto bbox = BBox(grid_bbox.min + vec3(cell.min) * cell_size,
                      grid_bbox.min + vec3(cell.max) * cell_size);
-    bool intersect = intersect_prim_box(prim, bbox);
+    bool intersect = intersect_prim_cell(prim, bbox);
     if (!intersect) {
         cell_ids[id] = -1;
         ref_ids[id]  = -1;
@@ -164,37 +164,54 @@ __global__ void compute_split_masks(const int* __restrict__ cell_ids,
                                     int* split_masks,
                                     int num_split) {
     int id = threadIdx.x + blockDim.x * blockIdx.x;
-    int split_id = id / 8;
-    int child_id = id % 8;
-    if (split_id >= num_split) return;
+    if (id >= num_split) return;
 
-    auto cell_id = cell_ids[split_id];
+    auto cell_id = cell_ids[id];
     if (cell_id < 0) {
-        if (child_id == 0) split_masks[split_id] = 0;
+        split_masks[id] = 0;
         return;
     }
-    auto ref     =  ref_ids[split_id];
-    auto cell    = load_cell(cells + cell_id);
-    auto prim    = load_prim(prims + ref);
+    auto ref  =  ref_ids[id];
+    auto cell = load_cell(cells + cell_id);
+    auto prim = load_prim(prims + ref);
 
-    auto middle = (cell.min + cell.max) / 2;
-    auto child_min = grid_bbox.min + cell_size *
-                     vec3(child_id & 1 ? middle.x : cell.min.x,
-                          child_id & 2 ? middle.y : cell.min.y,
-                          child_id & 4 ? middle.z : cell.min.z);
-    auto child_max = grid_bbox.min + cell_size *
-                     vec3(child_id & 1 ? cell.max.x : middle.x,
-                          child_id & 2 ? cell.max.y : middle.y,
-                          child_id & 4 ? cell.max.z : middle.z);
-    BBox bbox(child_min, child_max);
+    auto cell_min = grid_bbox.min + cell_size * vec3(cell.min);
+    auto cell_max = grid_bbox.min + cell_size * vec3(cell.max);
+    auto middle = (cell_min + cell_max) * 0.5f;
 
-    bool intersect = intersect_prim_box(prim, bbox);
+    int mask = 0xFF;
 
-    int mask = intersect ? 1 << child_id : 0;
-    mask |= __shfl_down(mask, 4);
-    mask |= __shfl_down(mask, 2);
-    mask |= __shfl_down(mask, 1);
-    if (child_id == 0) split_masks[split_id] = mask;
+    // Optimization: Test against half spaces first
+    auto ref_bb = prim.bbox();
+    if (ref_bb.min.x > cell_max.x ||
+        ref_bb.max.x < cell_min.x) mask  = 0;
+    if (ref_bb.min.x >   middle.x) mask &= 0xAA;
+    if (ref_bb.max.x <   middle.x) mask &= 0x55;
+    if (ref_bb.min.y > cell_max.y ||
+        ref_bb.max.y < cell_min.y) mask  = 0;
+    if (ref_bb.min.y >   middle.y) mask &= 0xCC;
+    if (ref_bb.max.y <   middle.y) mask &= 0x33;
+    if (ref_bb.min.z > cell_max.z ||
+        ref_bb.max.z < cell_min.z) mask  = 0;
+    if (ref_bb.min.z >   middle.z) mask &= 0xF0;
+    if (ref_bb.max.z <   middle.z) mask &= 0x0F;
+
+    for (int i = __ffs(mask) - 1;;) {
+        auto bbox = BBox(vec3(i & 1 ? middle.x : cell_min.x,
+                              i & 2 ? middle.y : cell_min.y,
+                              i & 4 ? middle.z : cell_min.z),
+                         vec3(i & 1 ? cell_max.x : middle.x,
+                              i & 2 ? cell_max.y : middle.y,
+                              i & 4 ? cell_max.z : middle.z));
+        if (!intersect_prim_cell(prim, bbox)) mask &= ~(1 << i);
+
+        // Skip non-intersected children
+        int skip = __ffs(mask >> (i + 1));
+        if (skip == 0) break;
+        i += 1 + (skip - 1);
+    }
+
+    split_masks[id] = mask;
 }
 
 /// Compute a mask for each reference which determines which sub-cell is intersected
@@ -574,7 +591,7 @@ bool build_iter(MemManager& mem, const BuildParams& params,
     // Split the references
     auto split_masks = mem.alloc<int>(Slot::SPLIT_MASKS, num_split + 1);
     auto start_split = mem.alloc<int>(Slot::START_SPLIT, num_split + 1);
-    compute_split_masks<<<round_div(num_split * 8, 64), 64>>>(cell_ids + num_kept, ref_ids + num_kept, prims, cells, split_masks, num_split);
+    compute_split_masks<<<round_div(num_split, 64), 64>>>(cell_ids + num_kept, ref_ids + num_kept, prims, cells, split_masks, num_split);
     DEBUG_SYNC();
 
     int num_new_refs = par.scan(par.transform(split_masks, [] __device__ (int mask) {

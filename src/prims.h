@@ -135,8 +135,8 @@ HOST DEVICE inline bool intersect_tri_box(const vec3& v0, const vec3& e1, const 
     return true;
 }
 
-HOST DEVICE inline bool intersect_prim_box(const Tri& tri, const BBox& bbox) {
-    return intersect_tri_box<true, true>(tri.v0, tri.e1, tri.e2, tri.normal(), bbox.min, bbox.max);
+HOST DEVICE inline bool intersect_prim_cell(const Tri& tri, const BBox& bbox) {
+    return intersect_tri_box<false, true>(tri.v0, tri.e1, tri.e2, tri.normal(), bbox.min, bbox.max);
 }
 
 HOST DEVICE inline bool intersect_prim_ray(const Tri& tri, const Ray& ray, int id, Hit& hit) {
