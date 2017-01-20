@@ -21,14 +21,17 @@ struct Slot {
         TMP_STORAGE,
         BBOXES,
         START_EMIT,
-        START_SPLIT = START_EMIT,
         NEW_REF_COUNTS,
-        SPLIT_MASKS = NEW_REF_COUNTS,
         REFS_PER_CELL,
         LOG_DIMS,
         START_CELL,
         KEPT_FLAGS,
-        ARRAYS
+        ARRAYS,
+
+        // Aliases
+        START_SPLIT = START_EMIT,
+        SPLIT_MASKS = NEW_REF_COUNTS,
+        MERGE_COUNTS = NEW_REF_COUNTS,
     };
 
     static Name ref_array(int i)   { return Name(int(ARRAYS) + 3 * i + 0); }

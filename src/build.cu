@@ -448,7 +448,7 @@ __global__ void remap_refs(int* __restrict__ cell_ids,
     cell_ids[id] = start_cell[cell_ids[id]];
 }
 
-/// Sets the cell ranges after run length encoding on references
+/// Sets the cell ranges once the references are sorted by cell
 __global__ void compute_cell_ranges(const int* cell_ids, Cell* cells, int num_refs) {
     int id = threadIdx.x + blockDim.x * blockIdx.x;
     if (id >= num_refs) return;
@@ -683,20 +683,22 @@ void concat_levels(MemManager& mem, std::vector<Level>& levels, Grid& grid) {
 
     mem.free(Slot::START_CELL);
 
-    // Sort the references by cell
-    auto tmp_ref_ids  = mem.alloc<int>(Slot::ref_array(num_levels + 2), total_refs);
-    auto tmp_cell_ids = mem.alloc<int>(Slot::ref_array(num_levels + 3), total_refs); 
+    // Sort the references by cell (re-use old slots whenever possible)
+    auto tmp_ref_slot  = Slot::ref_array(num_levels - 1);
+    auto tmp_cell_slot = Slot::ref_array(num_levels >= 2 ? num_levels - 2 : num_levels + 2);
+    auto tmp_ref_ids  = mem.alloc<int>(tmp_ref_slot,  total_refs);
+    auto tmp_cell_ids = mem.alloc<int>(tmp_cell_slot, total_refs);
     par.sort_pairs(cell_ids, ref_ids, tmp_cell_ids, tmp_ref_ids, total_refs);
     if (ref_ids != tmp_ref_ids) {
         std::swap(tmp_ref_ids, ref_ids);
-        mem.swap(Slot::ref_array(num_levels + 2), Slot::ref_array(num_levels + 0));
+        mem.swap(tmp_ref_slot, Slot::ref_array(num_levels + 0));
     }
     if (cell_ids != tmp_cell_ids) {
         std::swap(tmp_cell_ids, cell_ids);
-        mem.swap(Slot::ref_array(num_levels + 3), Slot::ref_array(num_levels + 1));
+        mem.swap(tmp_cell_slot, Slot::ref_array(num_levels + 1));
     }
-    mem.free(Slot::ref_array(num_levels + 2));
-    mem.free(Slot::ref_array(num_levels + 3));
+    mem.free(tmp_ref_slot);
+    mem.free(tmp_cell_slot);
 
     // Compute the ranges of references for each cell
     compute_cell_ranges<<<round_div(total_refs, 64), 64>>>(cell_ids, cells, total_refs);
@@ -707,10 +709,16 @@ void concat_levels(MemManager& mem, std::vector<Level>& levels, Grid& grid) {
     grid.entries = entries;
     grid.ref_ids = ref_ids;
     grid.cells   = cells;
-    grid.num_levels  = levels.size();
+    grid.shift   = levels.size() - 1;
     grid.num_cells   = new_total_cells;
     grid.num_entries = total_cells;
     grid.num_refs    = total_refs;
+
+    grid.offsets.resize(levels.size());
+    for (int i = 0, off = 0; i < levels.size(); i++) {
+        off += levels[i].num_cells;
+        grid.offsets[i] = off;
+    }
 }
 
 template <typename Primitive>
@@ -751,7 +759,6 @@ void build(MemManager& mem, const BuildParams& params, const Primitive* prims, i
 
     concat_levels(mem, levels, grid);
     grid.dims  = dims;
-    grid.shift = grid_shift;
     grid.bbox  = grid_bb;
 }
 

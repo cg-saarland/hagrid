@@ -25,6 +25,8 @@ template <typename T> HOST DEVICE T min(T a, T b) { return a < b ? a : b; }
 template <typename T> HOST DEVICE T max(T a, T b) { return a > b ? a : b; }
 /// Clamps the first value in the range defined by the last two arguments
 template <typename T> HOST DEVICE T clamp(T a, T b, T c) { return min(c, max(b, a)); }
+/// Swaps the contents of two references
+template <typename T> HOST DEVICE void swap(T& a, T& b) { auto tmp = a; a = b; b = tmp; }
 
 /// Reinterprets a values as unsigned int
 template <typename U, typename T>
@@ -69,6 +71,41 @@ HOST DEVICE inline int icbrt(int x) {
         }
     }
     return y;
+}
+
+/// Swaps two blocks of elements of the same size in the same array, preserving order
+template <typename T>
+HOST DEVICE void block_swap_equal(T* ptr, int a, int b, int n) {
+    for (auto i = a, j = b, m = a + n; i != m; ++i, ++j) swap(ptr[i], ptr[j]);
+}
+
+/// Swaps two non-overlapping contiguous blocks of elements in the same array, preserving order
+template <typename T>
+HOST DEVICE void block_swap_contiguous(T* ptr, int a, int b, int c) {
+    auto d1 = b - a;
+    auto d2 = c - b;
+
+    while (min(d1, d2) > 0) {
+        block_swap_equal(ptr, a, d1 < d2 ? c - d1 : b, min(d1, d2));
+        c = d1 < d2 ? c - d1 : c;
+        a = d1 < d2 ? a : a + d2;
+        d1 = b - a;
+        d2 = c - b;
+    }
+}
+
+/// Swaps two non-overlapping disjoint blocks of elements in the same array, preserving order
+template <typename T>
+HOST DEVICE void block_swap_disjoint(T* ptr, int a, int b, int c, int d) {
+    if (d < a) {
+        swap(a, c);
+        swap(c, d);
+    }
+    int d1 = b - a;
+    int d2 = c - b;
+    block_swap_contiguous(ptr, a, b, c);
+    block_swap_contiguous(ptr, c - d1, c, d);
+    block_swap_contiguous(ptr, a, a + d2, d - d1);
 }
 
 #ifdef __NVCC__

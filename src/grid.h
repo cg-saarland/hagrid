@@ -1,6 +1,8 @@
 #ifndef GRID_H
 #define GRID_H
 
+#include <vector>
+
 #include "vec.h"
 #include "bbox.h"
 
@@ -36,17 +38,17 @@ struct Cell {
 
 /// Structure holding an irregular grid
 struct Grid {
-    Entry* entries;     ///< Voxel map, stored as a contiguous array
-    int*   ref_ids;     ///< Array of primitive references
-    Cell*  cells;       ///< Cells of the structure
+    Entry* entries;             ///< Voxel map, stored as a contiguous array
+    int*   ref_ids;             ///< Array of primitive references
+    Cell*  cells;               ///< Cells of the structure
 
-    BBox bbox;          ///< Bounding box of the scene
-    ivec3 dims;         ///< Top-level dimensions
-    int shift;          ///< Maximum octree depth of all cells
-    int num_cells;      ///< Number of cells
-    int num_levels;     ///< Maximum depth of the voxel map
-    int num_entries;    ///< Number of elements in the voxel map
-    int num_refs;       ///< Number of primitive references
+    BBox bbox;                  ///< Bounding box of the scene
+    ivec3 dims;                 ///< Top-level dimensions
+    int num_cells;              ///< Number of cells
+    int num_entries;            ///< Number of elements in the voxel map
+    int num_refs;               ///< Number of primitive references
+    int shift;                  ///< Amount of bits to shift to get from the deepest level to the top-level
+    std::vector<int> offsets;   ///< Offset to each level of the voxel map octree
 };
 
 /// A 3D integer range

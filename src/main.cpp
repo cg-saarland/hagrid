@@ -7,6 +7,7 @@
 #include <SDL2/SDL.h>
 
 #include "build.h"
+#include "merge.h"
 #include "load_obj.h"
 #include "mem_manager.h"
 #include "traverse.h"
@@ -143,15 +144,6 @@ bool ProgramOptions::parse(int argc, char** argv) {
         } else if (matches(arg, "-sd", "--snd-density")) {
             if (!arg_exists(argv, i, argc)) return false;
             build_params.snd_density = strtof(argv[++i], nullptr);
-        } else if (matches(arg, "-a", "--alpha")) {
-            if (!arg_exists(argv, i, argc)) return false;
-            build_params.alpha = strtof(argv[++i], nullptr);
-        } else if (matches(arg, "-e", "--expansion")) {
-            if (!arg_exists(argv, i, argc)) return false;
-            build_params.expansion = strtol(argv[++i], nullptr, 10);
-        } else if (matches(arg, "-s", "--shift")) {
-            if (!arg_exists(argv, i, argc)) return false;
-            build_params.level_shift = strtol(argv[++i], nullptr, 10);
         } else if (matches(arg, "-nb", "--build-iter")) {
             if (!arg_exists(argv, i, argc)) return false;
             build_iter = strtol(argv[++i], nullptr, 10);
@@ -256,12 +248,9 @@ static void usage() {
                  "  -f      --fov           sets the field of view\n"
                  "  -td     --top-density   sets the top-level density\n"
                  "  -sd     --snd-density   sets the second-level density\n"
-                 "  -a      --alpha         sets the ratio that controls cell merging\n"
-                 "  -e      --expansion     sets the number of expansion passes\n"
-                 "  -s      --shift         sets the number of octree levels per subdivision iteration\n"
                  "  -nb     --build-iter    sets the number of build iterations\n"
                  "  -wb     --build-warmup  sets the number of warmup build iterations\n"
-                 "  -k      --keep-alive    keeps the buffers alive during construction\n" << std::endl;
+                 "  -k      --keep-alive    keep the buffers alive during construction\n" << std::endl;
 }
 
 int main(int argc, char** argv) {
@@ -301,13 +290,17 @@ int main(int argc, char** argv) {
     for (int i = 0; i < opts.build_warmup; i++) {
         mem.free_all();
         build_grid(mem, opts.build_params, tris, host_tris.size(), grid);
+        merge_grid(mem, grid);
     }
 
     // Benchmark construction speed
     double total_time = 0;
     for (int i = 0; i < opts.build_iter; i++) {
         mem.free_all();
-        auto kernel_time = profile([&] { build_grid(mem, opts.build_params, tris, host_tris.size(), grid); });
+        auto kernel_time = profile([&] {
+            build_grid(mem, opts.build_params, tris, host_tris.size(), grid);
+            merge_grid(mem, grid);
+        });
         total_time += kernel_time;
     }
     auto dims = grid.dims << grid.shift;
@@ -374,7 +367,7 @@ int main(int argc, char** argv) {
         kernel_time += profile([&] { traverse(grid, tris, rays, hits, num_rays); });
         frames++;
 
-        if (SDL_GetTicks() - ticks >= 500) {
+        if (SDL_GetTicks() - ticks >= 2000) {
             std::ostringstream caption;
             caption << "HaGrid [" << double(frames) * double(opts.width * opts.height) / (1000 * kernel_time) << " MRays/s]";
             SDL_SetWindowTitle(win, caption.str().c_str());

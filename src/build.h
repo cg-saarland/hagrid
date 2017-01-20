@@ -11,27 +11,20 @@ namespace hagrid {
 struct BuildParams {
     float top_density;          ///< Top-level density
     float snd_density;          ///< Second-level density
-    float alpha;                ///< Beween [0, 1], controls the merge phase
-    int expansion;              ///< Number of expansion passes
-    int level_shift;            ///< Number of octree levels per subdivision iteration
 
     /// Check the validity of the construction parameters
     bool valid() const {
-        return top_density >  0 &&
-               snd_density >= 0 &&
-               alpha >= 0 &&
-               expansion >= 0 &&
-               level_shift >= 1 && level_shift < (1 << Entry::LOG_DIM_BITS);
+        return top_density >  0 && snd_density >= 0;
     }
 
     /// Default construction parameters for a static scene
     static constexpr BuildParams static_scene() {
-        return BuildParams{0.12f, 2.4f, 0.995f, 3, 3};
+        return BuildParams{0.12f, 2.4f};
     }
 
     /// Default construction parameters for a dynamic scene
     static constexpr BuildParams dynamic_scene() {
-        return BuildParams{0.06f, 1.2f, 0.995f, 1, 3};
+        return BuildParams{0.06f, 1.2f};
     }
 };
 
