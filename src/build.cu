@@ -688,7 +688,7 @@ void concat_levels(MemManager& mem, std::vector<Level>& levels, Grid& grid) {
     auto tmp_cell_slot = Slot::ref_array(num_levels >= 2 ? num_levels - 2 : num_levels + 2);
     auto tmp_ref_ids  = mem.alloc<int>(tmp_ref_slot,  total_refs);
     auto tmp_cell_ids = mem.alloc<int>(tmp_cell_slot, total_refs);
-    par.sort_pairs(cell_ids, ref_ids, tmp_cell_ids, tmp_ref_ids, total_refs);
+    par.sort_pairs(cell_ids, ref_ids, tmp_cell_ids, tmp_ref_ids, total_refs, ilog2(new_total_cells));
     if (ref_ids != tmp_ref_ids) {
         std::swap(tmp_ref_ids, ref_ids);
         mem.swap(tmp_ref_slot, Slot::ref_array(num_levels + 0));

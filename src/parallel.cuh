@@ -72,13 +72,13 @@ public:
 
     /// Computes a partition of the given set according to an array of flags, returns the number of elements in first half
     template <typename Key, typename Value>
-    void sort_pairs(Key* keys_in, Value* values_in, Key*& keys_out, Value*& values_out, int n) {
+    void sort_pairs(Key* keys_in, Value* values_in, Key*& keys_out, Value*& values_out, int n, int bits = sizeof(Key) * 8) {
         size_t required_bytes;
         cub::DoubleBuffer<Key>   keys_buf(keys_in, keys_out);
         cub::DoubleBuffer<Value> values_buf(values_in, values_out);
-        CHECK_CUDA_CALL(cub::DeviceRadixSort::SortPairs(nullptr, required_bytes, keys_buf, values_buf, n));
+        CHECK_CUDA_CALL(cub::DeviceRadixSort::SortPairs(nullptr, required_bytes, keys_buf, values_buf, n, 0, bits));
         char* tmp_storage = mem_.alloc<char>(Slot::TMP_STORAGE, required_bytes + sizeof(int));
-        CHECK_CUDA_CALL(cub::DeviceRadixSort::SortPairs(tmp_storage, required_bytes, keys_buf, values_buf, n));
+        CHECK_CUDA_CALL(cub::DeviceRadixSort::SortPairs(tmp_storage, required_bytes, keys_buf, values_buf, n, 0, bits));
         mem_.free(Slot::TMP_STORAGE);
         keys_out   = keys_buf.Current();
         values_out = values_buf.Current();

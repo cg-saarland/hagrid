@@ -73,6 +73,16 @@ HOST DEVICE inline int icbrt(int x) {
     return y;
 }
 
+/// Computes the logarithm in base 2 of an integer such that (1 << log2(x)) >= x
+HOST DEVICE inline int ilog2(int x) {
+    int p = 1, q = 0;
+    while (p < x) {
+        p <<= 1;
+        q++;
+    }
+    return q;
+}
+
 /// Swaps two blocks of elements of the same size in the same array, preserving order
 template <typename T>
 HOST DEVICE void block_swap_equal(T* ptr, int a, int b, int n) {
