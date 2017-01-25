@@ -24,14 +24,14 @@ struct Slot {
         NEW_REF_COUNTS,
         REFS_PER_CELL,
         LOG_DIMS,
-        START_CELL,
         KEPT_FLAGS,
         ARRAYS,
 
         // Aliases
-        START_SPLIT = START_EMIT,
-        SPLIT_MASKS = NEW_REF_COUNTS,
-        MERGE_COUNTS = NEW_REF_COUNTS,
+        START_SPLIT   = START_EMIT,
+        START_CELL    = START_EMIT,
+        SPLIT_MASKS   = NEW_REF_COUNTS,
+        MERGE_BUFFERS = NEW_REF_COUNTS,
     };
 
     static Name ref_array(int i)   { return Name(int(ARRAYS) + 3 * i + 0); }
@@ -75,6 +75,11 @@ public:
         Slot& slot = slots_[name];
         alloc_slot(slot, sizeof(T) * n);
         return reinterpret_cast<T*>(slot.ptr);
+    }
+
+    template <typename T>
+    HOST T* slot(Slot::Name name) {
+        return reinterpret_cast<T*>(slots_[name].ptr);
     }
 
     /// Frees the contents of the given slot

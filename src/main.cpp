@@ -7,7 +7,6 @@
 #include <SDL2/SDL.h>
 
 #include "build.h"
-#include "merge.h"
 #include "load_obj.h"
 #include "mem_manager.h"
 #include "traverse.h"
@@ -74,6 +73,7 @@ void update_surface(SDL_Surface* surf, std::vector<Hit>& hits, float clip, int w
 struct ProgramOptions {
     std::string scene_file;
     BuildParams build_params;
+    float alpha;
     int width, height;
     float clip, fov;
     int build_iter;
@@ -83,6 +83,7 @@ struct ProgramOptions {
 
     ProgramOptions()
         : build_params(BuildParams::static_scene())
+        , alpha(1)
         , width(1024)
         , height(1024)
         , clip(100)
@@ -144,6 +145,9 @@ bool ProgramOptions::parse(int argc, char** argv) {
         } else if (matches(arg, "-sd", "--snd-density")) {
             if (!arg_exists(argv, i, argc)) return false;
             build_params.snd_density = strtof(argv[++i], nullptr);
+        } else if (matches(arg, "-a", "--alpha")) {
+            if (!arg_exists(argv, i, argc)) return false;
+            alpha = strtof(argv[++i], nullptr);
         } else if (matches(arg, "-nb", "--build-iter")) {
             if (!arg_exists(argv, i, argc)) return false;
             build_iter = strtol(argv[++i], nullptr, 10);
@@ -290,7 +294,7 @@ int main(int argc, char** argv) {
     for (int i = 0; i < opts.build_warmup; i++) {
         mem.free_all();
         build_grid(mem, opts.build_params, tris, host_tris.size(), grid);
-        merge_grid(mem, grid);
+        merge_grid(mem, grid, opts.alpha);
     }
 
     // Benchmark construction speed
@@ -299,7 +303,7 @@ int main(int argc, char** argv) {
         mem.free_all();
         auto kernel_time = profile([&] {
             build_grid(mem, opts.build_params, tris, host_tris.size(), grid);
-            merge_grid(mem, grid);
+            merge_grid(mem, grid, opts.alpha);
         });
         total_time += kernel_time;
     }

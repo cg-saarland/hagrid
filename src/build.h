@@ -29,6 +29,7 @@ struct BuildParams {
 };
 
 void build_grid(MemManager& mem, const BuildParams& params, const Tri* tris, int num_tris, Grid& grid);
+void merge_grid(MemManager& mem, Grid& grid, float alpha);
 
 } // namespace hagrid
 

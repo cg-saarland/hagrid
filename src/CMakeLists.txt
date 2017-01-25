@@ -12,7 +12,6 @@ cuda_compile(HAGRID_BUILD
     mem_manager.h
     parallel.cuh
     build.h
-    merge.h
     grid.h
     vec.h
     bbox.h

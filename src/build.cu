@@ -214,7 +214,7 @@ __global__ void compute_split_masks(const int* __restrict__ cell_ids,
     split_masks[id] = mask;
 }
 
-/// Compute a mask for each reference which determines which sub-cell is intersected
+/// Split references according to the given array of split masks
 __global__ void split_refs(const int* __restrict__ cell_ids,
                            const int* __restrict__ ref_ids,
                            const Entry* __restrict__ entries,
