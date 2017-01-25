@@ -22,16 +22,12 @@ HOST void MemManager::alloc_slot(Slot& slot, size_t size) {
         peak_ = std::max(usage_, peak_);
         slot.size = size;
     }
-#ifndef NDEBUG
     slot.in_use = true;
-#endif
 }
 
 HOST void MemManager::free_slot(Slot& slot) {
     assert(slot.in_use);
-#ifndef NDEBUG
     slot.in_use = false;
-#endif
     if (!keep_) {
         usage_ = usage_ - slot.size;
         if (slot.ptr) CHECK_CUDA_CALL(cudaFree(slot.ptr));

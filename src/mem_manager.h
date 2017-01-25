@@ -4,6 +4,7 @@
 #include <vector>
 #include <iostream>
 #include <cassert>
+#include <limits>
 #include "common.h"
 
 namespace hagrid {
@@ -30,8 +31,7 @@ struct Slot {
         // Aliases
         START_SPLIT   = START_EMIT,
         START_CELL    = START_EMIT,
-        SPLIT_MASKS   = NEW_REF_COUNTS,
-        MERGE_BUFFERS = NEW_REF_COUNTS,
+        SPLIT_MASKS   = NEW_REF_COUNTS
     };
 
     static Name ref_array(int i)   { return Name(int(ARRAYS) + 3 * i + 0); }
@@ -41,24 +41,21 @@ struct Slot {
     Slot()
         : ptr(nullptr)
         , size(0)
-#ifndef NDEBUG
         , in_use(false)
-#endif
     {}
 
     void* ptr;
     size_t size;
-#ifndef NDEBUG
     bool in_use;
-#endif
 };
 
 /// Utility class to manage memory buffers during construction
 class MemManager {
 public:
     /// Creates a manager object. The boolean flag controls whether
-    /// buffers are kept or deallocated upon a call to free(). This
-    /// flag should be set to true if the grid is built several times.
+    /// buffers are kept or deallocated upon a call to free(). Keeping
+    /// the buffers increases the memory usage, but speeds-up subsequent
+    /// builds (often useful for dynamic scenes).
     MemManager(bool keep = false)
         : keep_(keep), usage_(0), peak_(0)
     {}
@@ -78,7 +75,7 @@ public:
     }
 
     template <typename T>
-    HOST T* slot(Slot::Name name) {
+    HOST T* slot_ptr(Slot::Name name) {
         return reinterpret_cast<T*>(slots_[name].ptr);
     }
 
@@ -89,12 +86,29 @@ public:
         free_slot(slot);
     }
 
+    /// Find a free slot that can hold the given number of elements of type T
+    template <typename T>
+    HOST Slot::Name find_slot(size_t n) {
+        auto size = n * sizeof(T);
+        auto min  = std::numeric_limits<size_t>::max();
+        int found = -1;
+        for (int i = int(Slot::ARRAYS), n = slots_.size(); i < n; i++) {
+            auto& slot = slots_[i];
+            if (!slot.in_use && slot.size >= size && slot.size < min) {
+                found = i;
+                min = slot.size;
+            }
+        }
+        if (found < 0) found = max(int(Slot::ARRAYS), int(slots_.size()));
+        auto name = Slot::Name(found);
+        alloc<T>(name, n);
+        return name;
+    }
+
     /// Frees all the slots
     HOST void free_all() {
         if (keep_) {
-#ifndef NDEBUG
             for (auto& slot : slots_) slot.in_use = false;
-#endif
         } else {
             for (auto& slot : slots_) {
                 if (slot.ptr) free_slot(slot);
@@ -120,8 +134,7 @@ public:
         zero_dev(ptr, n * sizeof(T));
     }
 
-#ifndef NDEBUG
-    /// Displays slots and memory usage (debug only)
+    /// Displays slots and memory usage
     void debug_slots() const {
         size_t total = 0;
         std::cout << "SLOTS: " << std::endl;
@@ -132,7 +145,6 @@ public:
         }
         std::cout << (double)total / (1024.0 * 1024.0) << "MB total" << std::endl;
     }
-#endif
 
     /// Returns the current memory usage
     size_t usage() const { return usage_; }

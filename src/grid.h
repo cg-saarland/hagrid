@@ -17,10 +17,6 @@ struct Entry {
 
     uint32_t log_dim : LOG_DIM_BITS;    ///< Logarithm of the dimensions of the entry (0 for leaves)
     uint32_t begin   : BEGIN_BITS;      ///< Next entry index (cell index for leaves)
-
-    HOST DEVICE Entry(uint32_t l, uint32_t b)
-        : log_dim(l), begin(b)
-    {}
 };
 
 /// Cell of the irregular grid
@@ -63,6 +59,12 @@ struct Range {
     {}
     HOST DEVICE int size() const { return (hx - lx + 1) * (hy - ly + 1) * (hz - lz + 1) ; }
 };
+
+/// Returns a voxel map entry with the given dimension and starting index
+HOST DEVICE inline Entry make_entry(uint32_t log_dim, uint32_t begin) {
+    Entry e { .log_dim = log_dim, .begin = begin };
+    return e;
+}
 
 /// Computes the range of cells that intersect the given box
 HOST DEVICE inline Range compute_range(const ivec3& dims, const BBox& grid_bb, const BBox& obj_bb) {

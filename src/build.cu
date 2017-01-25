@@ -297,7 +297,7 @@ __global__ void compute_dims(const int*  __restrict__ cell_ids,
     auto top_cell_id = top_level_cell(cell_min);
     auto log_dim = log_dims[top_cell_id];
 
-    entries[cell_id] = Entry(min(log_dim, 1), 0);
+    entries[cell_id] = make_entry(min(log_dim, 1), 0);
 }
 
 /// Mark references that are kept so that they can be moved to the beginning of the array

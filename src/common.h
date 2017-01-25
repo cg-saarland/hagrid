@@ -83,41 +83,6 @@ HOST DEVICE inline int ilog2(int x) {
     return q;
 }
 
-/// Swaps two blocks of elements of the same size in the same array, preserving order
-template <typename T>
-HOST DEVICE void block_swap_equal(T* ptr, int a, int b, int n) {
-    for (auto i = a, j = b, m = a + n; i != m; ++i, ++j) swap(ptr[i], ptr[j]);
-}
-
-/// Swaps two non-overlapping contiguous blocks of elements in the same array, preserving order
-template <typename T>
-HOST DEVICE void block_swap_contiguous(T* ptr, int a, int b, int c) {
-    auto d1 = b - a;
-    auto d2 = c - b;
-
-    while (min(d1, d2) > 0) {
-        block_swap_equal(ptr, a, d1 < d2 ? c - d1 : b, min(d1, d2));
-        c = d1 < d2 ? c - d1 : c;
-        a = d1 < d2 ? a : a + d2;
-        d1 = b - a;
-        d2 = c - b;
-    }
-}
-
-/// Swaps two non-overlapping disjoint blocks of elements in the same array, preserving order
-template <typename T>
-HOST DEVICE void block_swap_disjoint(T* ptr, int a, int b, int c, int d) {
-    if (d < a) {
-        swap(a, c);
-        swap(c, d);
-    }
-    int d1 = b - a;
-    int d2 = c - b;
-    block_swap_contiguous(ptr, a, b, c);
-    block_swap_contiguous(ptr, c - d1, c, d);
-    block_swap_contiguous(ptr, a, a + d2, d - d1);
-}
-
 #ifdef __NVCC__
 #ifndef NDEBUG
 #define DEBUG_SYNC() CHECK_CUDA_CALL(cudaDeviceSynchronize())
