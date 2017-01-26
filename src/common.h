@@ -73,14 +73,23 @@ HOST DEVICE inline int icbrt(int x) {
     return y;
 }
 
+template <size_t N, size_t I = 0> struct Log2       { enum { Value = Log2<N / 2, I + 1>::Value }; };
+template <size_t I>               struct Log2<1, I> { enum { Value = I                         }; };
+
 /// Computes the logarithm in base 2 of an integer such that (1 << log2(x)) >= x
-HOST DEVICE inline int ilog2(int x) {
-    int p = 1, q = 0;
-    while (p < x) {
-        p <<= 1;
-        q++;
+template <typename T>
+HOST DEVICE int ilog2(T t) {
+    auto a = 0;
+    auto b = sizeof(T) * 8;
+    auto all = T(-1);
+    #pragma unroll
+    for (int i = 0; i < Log2<sizeof(T) * 8>::Value; i++) {
+        auto m = (a + b) / 2;
+        T mask = all << T(m);
+        if (t & mask) a = m + 1;
+        else          b = m;
     }
-    return q;
+    return a;
 }
 
 #ifdef __NVCC__

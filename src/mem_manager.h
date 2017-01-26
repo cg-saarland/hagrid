@@ -5,6 +5,7 @@
 #include <iostream>
 #include <cassert>
 #include <limits>
+#include <unordered_map>
 #include "common.h"
 
 namespace hagrid {
@@ -18,26 +19,6 @@ enum class Copy {
 
 /// A slot for a buffer in GPU memory
 struct Slot {
-    enum Name {
-        TMP_STORAGE,
-        BBOXES,
-        START_EMIT,
-        NEW_REF_COUNTS,
-        REFS_PER_CELL,
-        LOG_DIMS,
-        KEPT_FLAGS,
-        ARRAYS,
-
-        // Aliases
-        START_SPLIT   = START_EMIT,
-        START_CELL    = START_EMIT,
-        SPLIT_MASKS   = NEW_REF_COUNTS
-    };
-
-    static Name ref_array(int i)   { return Name(int(ARRAYS) + 3 * i + 0); }
-    static Name cell_array(int i)  { return Name(int(ARRAYS) + 3 * i + 1); }
-    static Name entry_array(int i) { return Name(int(ARRAYS) + 3 * i + 2); }
-
     Slot()
         : ptr(nullptr)
         , size(0)
@@ -57,71 +38,48 @@ public:
     /// the buffers increases the memory usage, but speeds-up subsequent
     /// builds (often useful for dynamic scenes).
     MemManager(bool keep = false)
-        : keep_(keep), usage_(0), peak_(0)
+        : keep_(keep), usage_(0), max_usage_(0)
     {}
 
-    /// Allocates a buffer
-    template <typename T> HOST T* alloc(size_t n) { return reinterpret_cast<T*>(alloc_no_slot(n * sizeof(T))); }
-    /// Frees a previously allocated buffer
-    template <typename T> HOST void free(T* ptr)  { return free_no_slot(ptr); }
-
-    /// Allocates a buffer in the given slot
+    /// Allocates a buffer, re-using allocated memory when possible
     template <typename T>
-    HOST T* alloc(Slot::Name name, size_t n) {
-        slots_.resize(std::max(slots_.size(), size_t(name + 1)));
-        Slot& slot = slots_[name];
-        alloc_slot(slot, sizeof(T) * n);
+    HOST T* alloc(size_t n) {
+        auto size = n * sizeof(T);
+        auto min_diff = std::numeric_limits<size_t>::max();
+        int found = -1;
+
+        for (int i = 0, n = slots_.size(); i < n; i++) {
+            auto& slot = slots_[i];
+            if (!slot.in_use) {
+                auto diff = std::max(size, slot.size) - std::min(size, slot.size);
+                if (diff < min_diff) {
+                    min_diff = diff;
+                    found = i;
+                }
+            }
+        }
+
+        if (found < 0) {
+            found = slots_.size();
+            slots_.resize(found + 1);
+        }
+
+        Slot& slot = slots_[found];
+        alloc_slot(slot, size);
+        tracker_[slot.ptr] = found;
         return reinterpret_cast<T*>(slot.ptr);
     }
 
-    template <typename T>
-    HOST T* slot_ptr(Slot::Name name) {
-        return reinterpret_cast<T*>(slots_[name].ptr);
-    }
-
     /// Frees the contents of the given slot
-    HOST void free(Slot::Name name) {
-        assert(name < slots_.size());
-        Slot& slot = slots_[name];
-        free_slot(slot);
-    }
-
-    /// Find a free slot that can hold the given number of elements of type T
     template <typename T>
-    HOST Slot::Name find_slot(size_t n) {
-        auto size = n * sizeof(T);
-        auto min  = std::numeric_limits<size_t>::max();
-        int found = -1;
-        for (int i = int(Slot::ARRAYS), n = slots_.size(); i < n; i++) {
-            auto& slot = slots_[i];
-            if (!slot.in_use && slot.size >= size && slot.size < min) {
-                found = i;
-                min = slot.size;
-            }
-        }
-        if (found < 0) found = max(int(Slot::ARRAYS), int(slots_.size()));
-        auto name = Slot::Name(found);
-        alloc<T>(name, n);
-        return name;
+    HOST void free(T* ptr) {
+        if (!ptr) return;
+        assert(tracker_.count(ptr));
+        free_slot(slots_[tracker_[ptr]]);
+        tracker_.erase(ptr);
     }
 
-    /// Frees all the slots
-    HOST void free_all() {
-        if (keep_) {
-            for (auto& slot : slots_) slot.in_use = false;
-        } else {
-            for (auto& slot : slots_) {
-                if (slot.ptr) free_slot(slot);
-            }
-        }
-    }
-
-    /// Swaps two slots within the memory manager
-    HOST void swap(Slot::Name name1, Slot::Name name2) {
-        assert(size_t(name1) < slots_.size() && size_t(name2) < slots_.size()); 
-        std::swap(slots_[name1], slots_[name2]);
-    }
-
+    /// Copies memory between buffers
     template <Copy type, typename T>
     HOST void copy(T* dst, const T* src, size_t n) {
         if (type == Copy::DEV_TO_DEV)      copy_dev_to_dev(dst, src, sizeof(T) * n);
@@ -129,31 +87,21 @@ public:
         else if (type == Copy::HST_TO_DEV) copy_hst_to_dev(dst, src, sizeof(T) * n);
     }
 
+    /// Fills memory with zeros
     template <typename T>
     HOST void zero(T* ptr, size_t n) {
         zero_dev(ptr, n * sizeof(T));
     }
 
     /// Displays slots and memory usage
-    void debug_slots() const {
-        size_t total = 0;
-        std::cout << "SLOTS: " << std::endl;
-        for (auto& slot : slots_) {
-            if (slot.in_use) std::cout << "[IN USE]";
-            std::cout << (double)slot.size / (1024.0 * 1024.0) << "MB" << std::endl;
-            total += slot.size;
-        }
-        std::cout << (double)total / (1024.0 * 1024.0) << "MB total" << std::endl;
-    }
+    void debug_slots() const;
 
     /// Returns the current memory usage
     size_t usage() const { return usage_; }
     /// Returns the maximum memory usage
-    size_t peak_usage() const { return peak_; }
+    size_t max_usage() const { return max_usage_; }
 
 private:
-    HOST void* alloc_no_slot(size_t);
-    HOST void free_no_slot(void*);
     HOST void alloc_slot(Slot&, size_t);
     HOST void free_slot(Slot&);
     HOST void copy_dev_to_dev(void*, const void*, size_t);
@@ -161,8 +109,9 @@ private:
     HOST void copy_hst_to_dev(void*, const void*, size_t);
     HOST void zero_dev(void*, size_t);
 
+    std::unordered_map<void*, int> tracker_;
     std::vector<Slot> slots_;
-    size_t usage_, peak_;
+    size_t usage_, max_usage_;
     bool keep_;
 };
 

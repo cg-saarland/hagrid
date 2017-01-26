@@ -476,22 +476,22 @@ void first_build_iter(MemManager& mem, const BuildParams& params,
     int num_top_cells = dims.x * dims.y * dims.z;
 
     // Emission of the references in 4 passes: count new refs + scan + emission + filtering
-    auto start_emit     = mem.alloc<int>(Slot::START_EMIT,     num_prims + 1);
-    auto new_ref_counts = mem.alloc<int>(Slot::NEW_REF_COUNTS, num_prims + 1);
-    auto refs_per_cell  = mem.alloc<int>(Slot::REFS_PER_CELL,  num_top_cells);
-    log_dims            = mem.alloc<int>(Slot::LOG_DIMS,       num_top_cells + 1);
+    auto start_emit     = mem.alloc<int>(num_prims + 1);
+    auto new_ref_counts = mem.alloc<int>(num_prims + 1);
+    auto refs_per_cell  = mem.alloc<int>(num_top_cells);
+    log_dims            = mem.alloc<int>(num_top_cells + 1);
     count_new_refs<<<round_div(num_prims, 64), 64>>>(bboxes, new_ref_counts, num_prims);
     DEBUG_SYNC();
 
     int num_new_refs = par.scan(new_ref_counts, num_prims + 1, start_emit);
-    mem.free(Slot::NEW_REF_COUNTS);
+    mem.free(new_ref_counts);
 
-    auto new_ref_ids  = mem.alloc<int>(Slot::ref_array(0), 2 * num_new_refs);
+    auto new_ref_ids  = mem.alloc<int>(2 * num_new_refs);
     auto new_cell_ids = new_ref_ids + num_new_refs;
     emit_new_refs<<<round_div(num_prims, 64), 64>>>(bboxes, start_emit, new_ref_ids, new_cell_ids, num_prims);
     DEBUG_SYNC();
 
-    mem.free(Slot::START_EMIT);
+    mem.free(start_emit);
 
     // Compute the number of references per cell
     mem.zero(refs_per_cell, num_top_cells);
@@ -501,7 +501,7 @@ void first_build_iter(MemManager& mem, const BuildParams& params,
     // Compute an independent resolution in each of the top-level cells
     compute_log_dims<<<round_div(num_top_cells, 64), 64>>>(refs_per_cell, log_dims, params.snd_density, num_top_cells);
     DEBUG_SYNC();
-    mem.free(Slot::REFS_PER_CELL);
+    mem.free(refs_per_cell);
 
     // Find the maximum sub-level resolution
     grid_shift = par.reduce(log_dims, num_top_cells, log_dims + num_top_cells, [] __device__ (int a, int b) { return max(a, b); });
@@ -511,8 +511,8 @@ void first_build_iter(MemManager& mem, const BuildParams& params,
     set_global(hagrid::cell_size,  &cell_size);
 
     // Emission of the new cells
-    auto new_cells   = mem.alloc<Cell >(Slot::cell_array(0),  num_top_cells + 0);
-    auto new_entries = mem.alloc<Entry>(Slot::entry_array(0), num_top_cells + 1);
+    auto new_cells   = mem.alloc<Cell >(num_top_cells + 0);
+    auto new_entries = mem.alloc<Entry>(num_top_cells + 1);
     emit_top_cells<<<round_div(num_top_cells, 64), 64>>>(new_cells, num_top_cells);
     DEBUG_SYNC();
     mem.zero(new_entries, num_top_cells + 1);
@@ -540,9 +540,8 @@ bool build_iter(MemManager& mem, const BuildParams& params,
     int num_cells = levels.back().num_cells;
 
     int cur_level  = levels.size();
-    int prev_level = cur_level - 1;
 
-    auto kept_flags = mem.alloc<int>(Slot::KEPT_FLAGS, num_refs + 1);
+    auto kept_flags = mem.alloc<int>(num_refs + 1);
 
     // Find out which cell will be split based on whether it is empty or not and the maximum depth
     compute_dims<<<round_div(num_refs, 64), 64>>>(cell_ids, cells, log_dims, entries, num_refs);
@@ -553,27 +552,27 @@ bool build_iter(MemManager& mem, const BuildParams& params,
     DEBUG_SYNC();
 
     // Store the sub-cells starting index in the entries
-    auto start_cell = mem.alloc<int>(Slot::START_CELL, num_cells + 1);
+    auto start_cell = mem.alloc<int>(num_cells + 1);
     int num_new_cells = par.scan(par.transform(entries, [] __device__ (Entry e) {
         return e.log_dim == 0 ? 0 : 8;
     }), num_cells + 1, start_cell);
     update_entries<<<round_div(num_cells, 64), 64>>>(start_cell, entries, num_cells);
     DEBUG_SYNC();
 
-    mem.free(Slot::START_CELL);
+    mem.free(start_cell);
 
     // Partition the set of cells into the sets of those which will be split and those which won't
-    auto tmp_ref_ids  = mem.alloc<int>(Slot::ref_array(cur_level), num_refs * 2);
+    auto tmp_ref_ids  = mem.alloc<int>(num_refs * 2);
     auto tmp_cell_ids = tmp_ref_ids + num_refs;
     int num_sel_refs  = par.partition(ref_ids,  tmp_ref_ids,  num_refs, kept_flags);
     int num_sel_cells = par.partition(cell_ids, tmp_cell_ids, num_refs, kept_flags);
     assert(num_sel_refs == num_sel_cells);
-    mem.free(Slot::KEPT_FLAGS);
 
-    std::swap(tmp_ref_ids,  ref_ids);
+    mem.free(kept_flags);
+
+    std::swap(tmp_ref_ids, ref_ids);
     std::swap(tmp_cell_ids, cell_ids);
-    mem.swap(Slot::ref_array(cur_level), Slot::ref_array(prev_level));
-    mem.free(Slot::ref_array(cur_level));
+    mem.free(tmp_ref_ids);
 
     int num_kept = num_sel_refs;
     levels.back().ref_ids  = ref_ids;
@@ -582,15 +581,15 @@ bool build_iter(MemManager& mem, const BuildParams& params,
 
     if (num_new_cells == 0) {
         // Exit here because no new reference will be emitted
-        mem.free(Slot::LOG_DIMS);
+        mem.free(log_dims);
         return false;
     }
 
     int num_split = num_refs - num_kept;
 
     // Split the references
-    auto split_masks = mem.alloc<int>(Slot::SPLIT_MASKS, num_split + 1);
-    auto start_split = mem.alloc<int>(Slot::START_SPLIT, num_split + 1);
+    auto split_masks = mem.alloc<int>(num_split + 1);
+    auto start_split = mem.alloc<int>(num_split + 1);
     compute_split_masks<<<round_div(num_split, 64), 64>>>(cell_ids + num_kept, ref_ids + num_kept, prims, cells, split_masks, num_split);
     DEBUG_SYNC();
 
@@ -599,17 +598,17 @@ bool build_iter(MemManager& mem, const BuildParams& params,
     }), num_split + 1, start_split);
     assert(num_new_refs <= 8 * num_split);
 
-    auto new_ref_ids = mem.alloc<int>(Slot::ref_array(cur_level), num_new_refs * 2);
+    auto new_ref_ids = mem.alloc<int>(num_new_refs * 2);
     auto new_cell_ids = new_ref_ids + num_new_refs;
     split_refs<<<round_div(num_split, 64), 64>>>(cell_ids + num_kept, ref_ids + num_kept, entries, split_masks, start_split, new_cell_ids, new_ref_ids, num_split);
     DEBUG_SYNC();
 
-    mem.free(Slot::SPLIT_MASKS);
-    mem.free(Slot::START_SPLIT);
+    mem.free(split_masks);
+    mem.free(start_split);
 
     // Emission of the new cells
-    auto new_cells   = mem.alloc<Cell >(Slot::cell_array(cur_level),  num_new_cells + 0);
-    auto new_entries = mem.alloc<Entry>(Slot::entry_array(cur_level), num_new_cells + 1);
+    auto new_cells   = mem.alloc<Cell >(num_new_cells + 0);
+    auto new_entries = mem.alloc<Entry>(num_new_cells + 1);
     emit_new_cells<<<round_div(num_cells, 64), 64>>>(entries, cells, new_cells, num_cells);
     DEBUG_SYNC();
     mem.zero(new_entries, num_new_cells + 1);
@@ -631,8 +630,8 @@ void concat_levels(MemManager& mem, std::vector<Level>& levels, Grid& grid) {
     }
 
     // Copy primitive references as-is
-    auto ref_ids = mem.alloc<int>(Slot::ref_array(num_levels + 0), total_refs);
-    auto cell_ids = mem.alloc<int>(Slot::ref_array(num_levels + 1), total_refs);
+    auto ref_ids  = mem.alloc<int>(total_refs);
+    auto cell_ids = mem.alloc<int>(total_refs);
     for (int i = 0, off = 0; i < num_levels; off += levels[i].num_kept, i++) {
         mem.copy<Copy::DEV_TO_DEV>(ref_ids + off, levels[i].ref_ids, levels[i].num_kept);
     }
@@ -643,11 +642,11 @@ void concat_levels(MemManager& mem, std::vector<Level>& levels, Grid& grid) {
             copy_refs<<<round_div(num_kept, 64), 64>>>(levels[i].cell_ids, cell_ids + off, cell_off, num_kept);
             DEBUG_SYNC();
         }
-        mem.free(Slot::ref_array(i));
+        mem.free(levels[i].ref_ids);
     }
 
     // Mark the cells at the leaves of the structure as kept
-    auto kept_cells = mem.alloc<int>(Slot::KEPT_FLAGS, total_cells + 1);
+    auto kept_cells = mem.alloc<int>(total_cells + 1);
     for (int i = 0, cell_off = 0; i < num_levels; cell_off += levels[i].num_cells, i++) {
         int num_cells = levels[i].num_cells;
         mark_kept_cells<<<round_div(num_cells, 64), 64>>>(levels[i].entries, kept_cells + cell_off, num_cells);
@@ -655,56 +654,50 @@ void concat_levels(MemManager& mem, std::vector<Level>& levels, Grid& grid) {
     }
 
     // Compute the insertion position of each cell
-    auto start_cell = mem.alloc<int>(Slot::START_CELL, total_cells + 1);
+    auto start_cell = mem.alloc<int>(total_cells + 1);
     int new_total_cells = par.scan(kept_cells, total_cells + 1, start_cell);
-    mem.free(Slot::KEPT_FLAGS);
+    mem.free(kept_cells);
 
     // Allocate new cells, and copy only the cells that are kept
-    auto cells = mem.alloc<Cell>(Slot::cell_array(num_levels), new_total_cells);
+    auto cells = mem.alloc<Cell>(new_total_cells);
     for (int i = 0, cell_off = 0; i < num_levels; cell_off += levels[i].num_cells, i++) {
         int num_cells = levels[i].num_cells;
         copy_cells<<<round_div(num_cells, 64), 64>>>(levels[i].cells, start_cell, cells, cell_off, num_cells);
         DEBUG_SYNC();
-        mem.free(Slot::cell_array(i));
+        mem.free(levels[i].cells);
     }
 
-    auto entries = mem.alloc<Entry>(Slot::entry_array(num_levels), total_cells);
+    auto entries = mem.alloc<Entry>(total_cells);
     for (int i = 0, off = 0; i < num_levels; off += levels[i].num_cells, i++) {
         int num_cells = levels[i].num_cells;
         int next_level_off = off + num_cells;
         copy_entries<<<round_div(num_cells, 64), 64>>>(levels[i].entries, start_cell, entries + off, off, next_level_off, num_cells);
         DEBUG_SYNC();
-        mem.free(Slot::entry_array(i));
+        mem.free(levels[i].entries);
     }
 
     // Remap the cell indices in the references (which currently map to incorrect cells)
     remap_refs<<<round_div(total_refs, 64), 64>>>(cell_ids, start_cell, total_refs);
     DEBUG_SYNC();
 
-    mem.free(Slot::START_CELL);
+    mem.free(start_cell);
 
     // Sort the references by cell (re-use old slots whenever possible)
-    auto tmp_ref_slot  = Slot::ref_array(num_levels - 1);
-    auto tmp_cell_slot = Slot::ref_array(num_levels >= 2 ? num_levels - 2 : num_levels + 2);
-    auto tmp_ref_ids  = mem.alloc<int>(tmp_ref_slot,  total_refs);
-    auto tmp_cell_ids = mem.alloc<int>(tmp_cell_slot, total_refs);
-    par.sort_pairs(cell_ids, ref_ids, tmp_cell_ids, tmp_ref_ids, total_refs, ilog2(new_total_cells));
-    if (ref_ids != tmp_ref_ids) {
-        std::swap(tmp_ref_ids, ref_ids);
-        mem.swap(tmp_ref_slot, Slot::ref_array(num_levels + 0));
-    }
-    if (cell_ids != tmp_cell_ids) {
-        std::swap(tmp_cell_ids, cell_ids);
-        mem.swap(tmp_cell_slot, Slot::ref_array(num_levels + 1));
-    }
-    mem.free(tmp_ref_slot);
-    mem.free(tmp_cell_slot);
+    auto tmp_ref_ids  = mem.alloc<int>(total_refs);
+    auto tmp_cell_ids = mem.alloc<int>(total_refs);
+    auto new_ref_ids  = tmp_ref_ids;
+    auto new_cell_ids = tmp_cell_ids;
+    par.sort_pairs(cell_ids, ref_ids, new_cell_ids, new_ref_ids, total_refs, ilog2(new_total_cells));
+    if (ref_ids  != new_ref_ids)  std::swap(ref_ids,  tmp_ref_ids);
+    if (cell_ids != new_cell_ids) std::swap(cell_ids, tmp_cell_ids);
+    mem.free(tmp_ref_ids);
+    mem.free(tmp_cell_ids);
 
     // Compute the ranges of references for each cell
     compute_cell_ranges<<<round_div(total_refs, 64), 64>>>(cell_ids, cells, total_refs);
     DEBUG_SYNC();
 
-    mem.free(Slot::ref_array(num_levels + 1));
+    mem.free(cell_ids);
 
     grid.entries = entries;
     grid.ref_ids = ref_ids;
@@ -727,7 +720,7 @@ void build(MemManager& mem, const BuildParams& params, const Primitive* prims, i
     Parallel par(mem);
 
     // Allocate a bounding box for each primitive + one for the global bounding box
-    auto bboxes = mem.alloc<BBox>(Slot::BBOXES, num_prims + 1);
+    auto bboxes = mem.alloc<BBox>(num_prims + 1);
 
     compute_bboxes<<<round_div(num_prims, 64), 64>>>(prims, bboxes, num_prims);
     auto grid_bb = par.reduce(bboxes, num_prims, bboxes + num_prims,
@@ -754,8 +747,8 @@ void build(MemManager& mem, const BuildParams& params, const Primitive* prims, i
     first_build_iter(mem, params, prims, num_prims, bboxes, grid_bb, dims, log_dims, grid_shift, levels);
 
     int iter = 1;
-    while (build_iter(mem, params, prims, num_prims, bboxes,  dims, log_dims, levels)) iter++;
-    mem.free(Slot::BBOXES);
+    while (build_iter(mem, params, prims, num_prims, bboxes, dims, log_dims, levels)) iter++;
+    mem.free(bboxes);
 
     concat_levels(mem, levels, grid);
     grid.dims  = dims;

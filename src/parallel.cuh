@@ -33,9 +33,9 @@ public:
         typedef typename ResultType<OutputIt>::Type T;
         size_t required_bytes;
         CHECK_CUDA_CALL(cub::DeviceScan::ExclusiveSum(nullptr, required_bytes, values, result, n));
-        char* tmp_storage = mem_.alloc<char>(Slot::TMP_STORAGE, required_bytes);
+        char* tmp_storage = mem_.alloc<char>(required_bytes);
         CHECK_CUDA_CALL(cub::DeviceScan::ExclusiveSum(tmp_storage, required_bytes, values, result, n));
-        mem_.free(Slot::TMP_STORAGE);
+        mem_.free(tmp_storage);
         T total;
         CHECK_CUDA_CALL(cudaMemcpy(&total, result + n - 1, sizeof(T), cudaMemcpyDeviceToHost));
         return total;
@@ -47,9 +47,9 @@ public:
         typedef typename ResultType<OutputIt>::Type T;
         size_t required_bytes;
         CHECK_CUDA_CALL(cub::DeviceReduce::Reduce(nullptr, required_bytes, values, result, n, f, init));
-        char* tmp_storage = mem_.alloc<char>(Slot::TMP_STORAGE, required_bytes);
+        char* tmp_storage = mem_.alloc<char>(required_bytes);
         CHECK_CUDA_CALL(cub::DeviceReduce::Reduce(tmp_storage, required_bytes, values, result, n, f, init));
-        mem_.free(Slot::TMP_STORAGE);
+        mem_.free(tmp_storage);
         T host_result;
         CHECK_CUDA_CALL(cudaMemcpy(&host_result, result, sizeof(T), cudaMemcpyDeviceToHost));
         return host_result;
@@ -61,12 +61,12 @@ public:
         size_t required_bytes;
         CHECK_CUDA_CALL(cub::DevicePartition::Flagged(nullptr, required_bytes, values, flags, result, (int*)nullptr, n));
         required_bytes += 4 - required_bytes % 4; // Align storage
-        char* tmp_storage = mem_.alloc<char>(Slot::TMP_STORAGE, required_bytes + sizeof(int));
+        char* tmp_storage = mem_.alloc<char>(required_bytes + sizeof(int));
         int* count_ptr = reinterpret_cast<int*>(tmp_storage + required_bytes);
         CHECK_CUDA_CALL(cub::DevicePartition::Flagged(tmp_storage, required_bytes, values, flags, result, count_ptr, n));
         int count;
         CHECK_CUDA_CALL(cudaMemcpy(&count, count_ptr, sizeof(int), cudaMemcpyDeviceToHost));
-        mem_.free(Slot::TMP_STORAGE);
+        mem_.free(tmp_storage);
         return count;
     }
 
@@ -77,9 +77,9 @@ public:
         cub::DoubleBuffer<Key>   keys_buf(keys_in, keys_out);
         cub::DoubleBuffer<Value> values_buf(values_in, values_out);
         CHECK_CUDA_CALL(cub::DeviceRadixSort::SortPairs(nullptr, required_bytes, keys_buf, values_buf, n, 0, bits));
-        char* tmp_storage = mem_.alloc<char>(Slot::TMP_STORAGE, required_bytes + sizeof(int));
+        char* tmp_storage = mem_.alloc<char>(required_bytes + sizeof(int));
         CHECK_CUDA_CALL(cub::DeviceRadixSort::SortPairs(tmp_storage, required_bytes, keys_buf, values_buf, n, 0, bits));
-        mem_.free(Slot::TMP_STORAGE);
+        mem_.free(tmp_storage);
         keys_out   = keys_buf.Current();
         values_out = values_buf.Current();
     }

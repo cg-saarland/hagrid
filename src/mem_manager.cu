@@ -3,14 +3,17 @@
 
 namespace hagrid {
 
-HOST void* MemManager::alloc_no_slot(size_t size) {
-    void* ptr;
-    CHECK_CUDA_CALL(cudaMalloc(&ptr, size));
-    return ptr;
-}
-
-HOST void MemManager::free_no_slot(void* ptr) {
-    CHECK_CUDA_CALL(cudaFree(ptr));
+HOST void MemManager::debug_slots() const {
+    size_t total = 0;
+    std::cout << "SLOTS: " << std::endl;
+    for (auto& slot : slots_) {
+        std::cout << "["
+                  << (slot.in_use ? 'X' : ' ')
+                  << "] "
+                  << (double)slot.size / (1024.0 * 1024.0) << "MB" << std::endl;
+        total += slot.size;
+    }
+    std::cout << (double)total / (1024.0 * 1024.0) << "MB total" << std::endl;
 }
 
 HOST void MemManager::alloc_slot(Slot& slot, size_t size) {
@@ -18,11 +21,25 @@ HOST void MemManager::alloc_slot(Slot& slot, size_t size) {
     if (slot.size < size) {
         if (slot.ptr) CHECK_CUDA_CALL(cudaFree(slot.ptr));
         CHECK_CUDA_CALL(cudaMalloc(&slot.ptr, size));
-        usage_ = usage_ + size - slot.size;
-        peak_ = std::max(usage_, peak_);
+        usage_     = usage_ + size - slot.size;
+        max_usage_ = std::max(usage_, max_usage_);
         slot.size = size;
     }
     slot.in_use = true;
+
+    if (keep_ && usage_ == max_usage_) {
+        size_t saved = 0;
+        // Deallocate the least used slots
+        for (auto& slot : slots_) {
+            if (slot.in_use) continue;
+            usage_ = usage_ - slot.size;
+            if (slot.ptr) CHECK_CUDA_CALL(cudaFree(slot.ptr));
+            saved += size;
+            slot.size = 0;
+            slot.ptr = nullptr;
+            if (saved == size) break;
+        }
+    }
 }
 
 HOST void MemManager::free_slot(Slot& slot) {

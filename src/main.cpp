@@ -289,10 +289,16 @@ int main(int argc, char** argv) {
     mem.copy<Copy::HST_TO_DEV>(tris, host_tris.data(), host_tris.size());
 
     Grid grid;
+    grid.entries = nullptr;
+    grid.cells   = nullptr;
+    grid.ref_ids = nullptr;
 
     // Warmup iterations
     for (int i = 0; i < opts.build_warmup; i++) {
-        mem.free_all();
+        mem.free(grid.entries);
+        mem.free(grid.cells);
+        mem.free(grid.ref_ids);
+
         build_grid(mem, opts.build_params, tris, host_tris.size(), grid);
         merge_grid(mem, grid, opts.alpha);
     }
@@ -300,7 +306,10 @@ int main(int argc, char** argv) {
     // Benchmark construction speed
     double total_time = 0;
     for (int i = 0; i < opts.build_iter; i++) {
-        mem.free_all();
+        mem.free(grid.entries);
+        mem.free(grid.cells);
+        mem.free(grid.ref_ids);
+
         auto kernel_time = profile([&] {
             build_grid(mem, opts.build_params, tris, host_tris.size(), grid);
             merge_grid(mem, grid, opts.alpha);
@@ -312,6 +321,10 @@ int main(int argc, char** argv) {
               << dims.x << "x" << dims.y << "x" << dims.z << ", "
               << grid.num_cells << " cells, " << grid.num_refs << " references)" << std::endl;
 
+    std::cout << std::endl;
+    mem.debug_slots();
+    std::cout << std::endl;
+
     const size_t cells_mem = grid.num_cells * sizeof(Cell);
     const size_t entries_mem = grid.num_entries * sizeof(int);
     const size_t refs_mem = grid.num_refs * sizeof(int);
@@ -322,7 +335,7 @@ int main(int argc, char** argv) {
     std::cout << "entries: " << entries_mem / double(1024 * 1024) << " MB" << std::endl;
     std::cout << "references: " << refs_mem / double(1024 * 1024) << " MB" << std::endl;
     std::cout << "triangles: " << tris_mem / double(1024 * 1024) << " MB" << std::endl;
-    std::cout << "peak usage: " << mem.peak_usage() / double(1024.0 * 1024.0) << " MB" << std::endl;
+    std::cout << "peak usage: " << mem.max_usage() / double(1024.0 * 1024.0) << " MB" << std::endl;
 
     setup_traversal(grid);
 
