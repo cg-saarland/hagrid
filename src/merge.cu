@@ -339,7 +339,6 @@ void merge_grid(MemManager& mem, Grid& grid, float alpha) {
     auto new_cells = mem.alloc<Cell>(grid.num_cells);
     auto new_refs  = mem.alloc<int> (grid.num_refs);
 
-    // Re-use old slots for the merge step buffers
     size_t buf_size = grid.num_cells + 1;
     buf_size = buf_size % 4 ? buf_size + 4 - buf_size % 4 : buf_size;
 
