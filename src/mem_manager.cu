@@ -16,6 +16,12 @@ HOST void MemManager::debug_slots() const {
     std::cout << (double)total / (1024.0 * 1024.0) << "MB total" << std::endl;
 }
 
+inline void dealloc_slot(Slot& slot) {
+    if (slot.ptr) CHECK_CUDA_CALL(cudaFree(slot.ptr));
+    slot.size = 0;
+    slot.ptr = nullptr;
+}
+
 HOST void MemManager::alloc_slot(Slot& slot, size_t size) {
     assert(!slot.in_use && "Buffer not deallocated properly");
     if (slot.size < size) {
@@ -27,17 +33,13 @@ HOST void MemManager::alloc_slot(Slot& slot, size_t size) {
     }
     slot.in_use = true;
 
-    if (keep_ && usage_ == max_usage_) {
-        size_t saved = 0;
-        // Deallocate the least used slots
+    if (keep_ && usage_ >= max_usage_) {
+        // Deallocate the first unused slot
         for (auto& slot : slots_) {
             if (slot.in_use) continue;
             usage_ = usage_ - slot.size;
-            if (slot.ptr) CHECK_CUDA_CALL(cudaFree(slot.ptr));
-            saved += size;
-            slot.size = 0;
-            slot.ptr = nullptr;
-            if (saved == size) break;
+            dealloc_slot(slot);
+            break;
         }
     }
 }
@@ -47,9 +49,7 @@ HOST void MemManager::free_slot(Slot& slot) {
     slot.in_use = false;
     if (!keep_) {
         usage_ = usage_ - slot.size;
-        if (slot.ptr) CHECK_CUDA_CALL(cudaFree(slot.ptr));
-        slot.size = 0;
-        slot.ptr = nullptr;
+        dealloc_slot(slot);
     }
 }
 
