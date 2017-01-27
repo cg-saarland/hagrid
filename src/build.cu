@@ -526,8 +526,8 @@ void first_build_iter(MemManager& mem, const BuildParams& params,
 template <typename Primitive>
 bool build_iter(MemManager& mem, const BuildParams& params,
                 const Primitive* prims, int num_prims,
-                const BBox* bboxes, const ivec3& dims,
-                int* log_dims, std::vector<Level>& levels) {
+                const ivec3& dims, int* log_dims,
+                std::vector<Level>& levels) {
     Parallel par(mem);
 
     int* cell_ids  = levels.back().cell_ids;
@@ -746,9 +746,10 @@ void build(MemManager& mem, const BuildParams& params, const Primitive* prims, i
     // Build top level
     first_build_iter(mem, params, prims, num_prims, bboxes, grid_bb, dims, log_dims, grid_shift, levels);
 
-    int iter = 1;
-    while (build_iter(mem, params, prims, num_prims, bboxes, dims, log_dims, levels)) iter++;
     mem.free(bboxes);
+
+    int iter = 1;
+    while (build_iter(mem, params, prims, num_prims, dims, log_dims, levels)) iter++;
 
     concat_levels(mem, levels, grid);
     grid.dims  = dims;
