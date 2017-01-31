@@ -100,7 +100,7 @@ __global__ void compute_merge_counts(const Entry* __restrict__ entries,
                                      int* __restrict__ merge_counts,
                                      int empty_mask,
                                      int num_cells) {
-    int id = threadIdx.x + blockIdx.x * blockDim.x;
+    int id = threadIdx.x + blockDim.x * blockIdx.x;
     if (id >= num_cells) return;
 
     static constexpr auto unit_cost = 1.0f;
@@ -145,7 +145,7 @@ __global__ void compute_cell_flags(const Entry* __restrict__ entries,
                                    const int* __restrict__ merge_counts,
                                    int* __restrict__ cell_flags,
                                    int num_cells) {
-    int id = threadIdx.x + blockIdx.x * blockDim.x;
+    int id = threadIdx.x + blockDim.x * blockIdx.x;
     if (id >= num_cells) return;
 
     auto cell = load_cell(cells + id);
@@ -186,7 +186,7 @@ __global__ void compute_ref_counts(const int* __restrict__ merge_counts,
                                     const int* __restrict__ cell_flags,
                                     int* __restrict__ ref_counts,
                                     int num_cells) {
-    int id = threadIdx.x + blockIdx.x * blockDim.x;
+    int id = threadIdx.x + blockDim.x * blockIdx.x;
     if (id >= num_cells) return;
 
     int count = 0;
@@ -209,7 +209,7 @@ __global__ void merge(const Entry* __restrict__ entries,
                       Cell* __restrict__ new_cells,
                       int* __restrict__ new_refs,
                       int num_cells) {
-    int id = threadIdx.x + blockIdx.x * blockDim.x;
+    int id = threadIdx.x + blockDim.x * blockIdx.x;
 
     bool valid = id < num_cells;
     int new_id = valid ? cell_scan[id] : 0;
@@ -218,6 +218,7 @@ __global__ void merge(const Entry* __restrict__ entries,
     int cell_begin = 0, cell_end = 0;
     int next_begin = 0, next_end = 0;
     int new_refs_begin;
+
     if (valid) {
         auto cell = load_cell(cells + id);
         int merge_count = merge_counts[id];
@@ -286,7 +287,7 @@ __global__ void merge(const Entry* __restrict__ entries,
 __global__ void remap_entries(Entry* __restrict__ entries,
                               const int* __restrict__ new_cell_ids,
                               int num_entries) {
-    int id = threadIdx.x + blockIdx.x * blockDim.x;
+    int id = threadIdx.x + blockDim.x * blockIdx.x;
 
     if (id < num_entries) {
         auto entry = entries[id];

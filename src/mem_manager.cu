@@ -69,4 +69,9 @@ HOST void MemManager::zero_dev(void* ptr, size_t bytes) {
     CHECK_CUDA_CALL(cudaMemset(ptr, 0, bytes));
 }
 
+HOST void MemManager::one_dev(void* ptr, size_t bytes) {
+    CHECK_CUDA_CALL(cudaMemset(ptr, 0xFFFFFFFF, bytes));
+}
+
+
 } // namespace hagrid

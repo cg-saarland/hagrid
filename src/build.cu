@@ -467,7 +467,7 @@ __global__ void compute_cell_ranges(const int* cell_ids, Cell* cells, int num_re
 }
 
 template <typename Primitive>
-void first_build_iter(MemManager& mem, const BuildParams& params,
+void first_build_iter(MemManager& mem, float snd_density,
                       const Primitive* prims, int num_prims,
                       const BBox* bboxes, const BBox& grid_bb, const ivec3& dims,
                       int*& log_dims, int& grid_shift, std::vector<Level>& levels) {
@@ -499,7 +499,7 @@ void first_build_iter(MemManager& mem, const BuildParams& params,
     DEBUG_SYNC();
 
     // Compute an independent resolution in each of the top-level cells
-    compute_log_dims<<<round_div(num_top_cells, 64), 64>>>(refs_per_cell, log_dims, params.snd_density, num_top_cells);
+    compute_log_dims<<<round_div(num_top_cells, 64), 64>>>(refs_per_cell, log_dims, snd_density, num_top_cells);
     DEBUG_SYNC();
     mem.free(refs_per_cell);
 
@@ -524,7 +524,7 @@ void first_build_iter(MemManager& mem, const BuildParams& params,
 }
 
 template <typename Primitive>
-bool build_iter(MemManager& mem, const BuildParams& params,
+bool build_iter(MemManager& mem,
                 const Primitive* prims, int num_prims,
                 const ivec3& dims, int* log_dims,
                 std::vector<Level>& levels) {
@@ -715,7 +715,7 @@ void concat_levels(MemManager& mem, std::vector<Level>& levels, Grid& grid) {
 }
 
 template <typename Primitive>
-void build(MemManager& mem, const BuildParams& params, const Primitive* prims, int num_prims, Grid& grid) {
+void build(MemManager& mem, const Primitive* prims, int num_prims, Grid& grid, float top_density, float snd_density) {
     assert(params.valid());
     Parallel par(mem);
 
@@ -725,7 +725,7 @@ void build(MemManager& mem, const BuildParams& params, const Primitive* prims, i
     compute_bboxes<<<round_div(num_prims, 64), 64>>>(prims, bboxes, num_prims);
     auto grid_bb = par.reduce(bboxes, num_prims, bboxes + num_prims,
         [] __device__ (BBox a, const BBox& b) { return a.extend(b); }, BBox::empty());
-    auto dims = compute_grid_dims(grid_bb, num_prims, params.top_density);
+    auto dims = compute_grid_dims(grid_bb, num_prims, top_density);
     // Round to the next multiple of 2 on each dimension (in order to align the memory)
     dims.x = dims.x % 2 ? dims.x + 1 : dims.x;
     dims.y = dims.y % 2 ? dims.y + 1 : dims.y;
@@ -744,18 +744,18 @@ void build(MemManager& mem, const BuildParams& params, const Primitive* prims, i
     std::vector<Level> levels;
 
     // Build top level
-    first_build_iter(mem, params, prims, num_prims, bboxes, grid_bb, dims, log_dims, grid_shift, levels);
+    first_build_iter(mem, snd_density, prims, num_prims, bboxes, grid_bb, dims, log_dims, grid_shift, levels);
 
     mem.free(bboxes);
 
     int iter = 1;
-    while (build_iter(mem, params, prims, num_prims, dims, log_dims, levels)) iter++;
+    while (build_iter(mem, prims, num_prims, dims, log_dims, levels)) iter++;
 
     concat_levels(mem, levels, grid);
     grid.dims  = dims;
     grid.bbox  = grid_bb;
 }
 
-void build_grid(MemManager& mem, const BuildParams& params, const Tri* tris, int num_tris, Grid& grid) { build(mem, params, tris, num_tris, grid); }
+void build_grid(MemManager& mem, const Tri* tris, int num_tris, Grid& grid, float top_density, float snd_density) { build(mem, tris, num_tris, grid, top_density, snd_density); }
 
 } // namespace hagrid

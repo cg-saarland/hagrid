@@ -7,29 +7,9 @@
 
 namespace hagrid {
 
-/// Construction parameters
-struct BuildParams {
-    float top_density;          ///< Top-level density
-    float snd_density;          ///< Second-level density
-
-    /// Check the validity of the construction parameters
-    bool valid() const {
-        return top_density >  0 && snd_density >= 0;
-    }
-
-    /// Default construction parameters for a static scene
-    static constexpr BuildParams static_scene() {
-        return BuildParams{0.12f, 2.4f};
-    }
-
-    /// Default construction parameters for a dynamic scene
-    static constexpr BuildParams dynamic_scene() {
-        return BuildParams{0.06f, 1.2f};
-    }
-};
-
-void build_grid(MemManager& mem, const BuildParams& params, const Tri* tris, int num_tris, Grid& grid);
+void build_grid(MemManager& mem, const Tri* tris, int num_tris, Grid& grid, float top_density, float snd_density);
 void merge_grid(MemManager& mem, Grid& grid, float alpha);
+void expand_grid(MemManager& mem, Grid& grid, const Tri* tris, int iters);
 
 } // namespace hagrid
 

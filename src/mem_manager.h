@@ -89,9 +89,11 @@ public:
 
     /// Fills memory with zeros
     template <typename T>
-    HOST void zero(T* ptr, size_t n) {
-        zero_dev(ptr, n * sizeof(T));
-    }
+    HOST void zero(T* ptr, size_t n) { zero_dev(ptr, n * sizeof(T)); }
+
+    /// Fills memory with ones
+    template <typename T>
+    HOST void one(T* ptr, size_t n) { one_dev(ptr, n * sizeof(T)); }
 
     /// Displays slots and memory usage
     void debug_slots() const;
@@ -108,6 +110,7 @@ private:
     HOST void copy_dev_to_hst(void*, const void*, size_t);
     HOST void copy_hst_to_dev(void*, const void*, size_t);
     HOST void zero_dev(void*, size_t);
+    HOST void one_dev(void*, size_t);
 
     std::unordered_map<void*, int> tracker_;
     std::vector<Slot> slots_;

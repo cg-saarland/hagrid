@@ -72,8 +72,9 @@ void update_surface(SDL_Surface* surf, std::vector<Hit>& hits, float clip, int w
 
 struct ProgramOptions {
     std::string scene_file;
-    BuildParams build_params;
+    float top_density, snd_density;
     float alpha;
+    int exp_iters;
     int width, height;
     float clip, fov;
     int build_iter;
@@ -82,8 +83,10 @@ struct ProgramOptions {
     bool help;
 
     ProgramOptions()
-        : build_params(BuildParams::static_scene())
+        : top_density(0.12f)
+        , snd_density(2.4f)
         , alpha(1)
+        , exp_iters(3)
         , width(1024)
         , height(1024)
         , clip(100)
@@ -141,13 +144,16 @@ bool ProgramOptions::parse(int argc, char** argv) {
             fov = strtof(argv[++i], nullptr);
         } else if (matches(arg, "-td", "--top-density")) {
             if (!arg_exists(argv, i, argc)) return false;
-            build_params.top_density = strtof(argv[++i], nullptr);
+            top_density = strtof(argv[++i], nullptr);
         } else if (matches(arg, "-sd", "--snd-density")) {
             if (!arg_exists(argv, i, argc)) return false;
-            build_params.snd_density = strtof(argv[++i], nullptr);
+            snd_density = strtof(argv[++i], nullptr);
         } else if (matches(arg, "-a", "--alpha")) {
             if (!arg_exists(argv, i, argc)) return false;
             alpha = strtof(argv[++i], nullptr);
+        } else if (matches(arg, "-e", "--expansion")) {
+            if (!arg_exists(argv, i, argc)) return false;
+            exp_iters = strtol(argv[++i], nullptr, 10);
         } else if (matches(arg, "-nb", "--build-iter")) {
             if (!arg_exists(argv, i, argc)) return false;
             build_iter = strtol(argv[++i], nullptr, 10);
@@ -252,6 +258,8 @@ static void usage() {
                  "  -f      --fov           sets the field of view\n"
                  "  -td     --top-density   sets the top-level density\n"
                  "  -sd     --snd-density   sets the second-level density\n"
+                 "  -a      --alpha         sets the cell merging threshold\n"
+                 "  -e      --expansion     sets the number of expansion iterations\n"
                  "  -nb     --build-iter    sets the number of build iterations\n"
                  "  -wb     --build-warmup  sets the number of warmup build iterations\n"
                  "  -k      --keep-alive    keep the buffers alive during construction\n" << std::endl;
@@ -269,11 +277,6 @@ int main(int argc, char** argv) {
     if (opts.help) {
         usage();
         return 0;
-    }
-
-    if (!opts.build_params.valid()) {
-        std::cerr << "the specified build options are invalid" << std::endl;
-        return 1;
     }
 
     std::vector<Tri> host_tris;
@@ -299,8 +302,9 @@ int main(int argc, char** argv) {
         mem.free(grid.cells);
         mem.free(grid.ref_ids);
 
-        build_grid(mem, opts.build_params, tris, host_tris.size(), grid);
+        build_grid(mem, tris, host_tris.size(), grid, opts.top_density, opts.snd_density);
         merge_grid(mem, grid, opts.alpha);
+        expand_grid(mem, grid, tris, opts.exp_iters);
     }
 
     // Benchmark construction speed
@@ -311,8 +315,9 @@ int main(int argc, char** argv) {
         mem.free(grid.ref_ids);
 
         auto kernel_time = profile([&] {
-            build_grid(mem, opts.build_params, tris, host_tris.size(), grid);
+            build_grid(mem, tris, host_tris.size(), grid, opts.top_density, opts.snd_density);
             merge_grid(mem, grid, opts.alpha);
+            expand_grid(mem, grid, tris, opts.exp_iters);
         });
         total_time += kernel_time;
     }
