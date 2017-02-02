@@ -17,14 +17,6 @@ static __constant__ ivec3 grid_dims;
 static __constant__ vec3  cell_size;
 static __constant__ int   grid_shift;
 
-/// Gets the component of the given vector on the specified axis
-template <int axis, typename T>
-__device__ T get(const tvec3<T>& v) {
-    if (axis == 0) return v.x;
-    else if (axis == 1) return v.y;
-    else return v.z;
-}
-
 template <int axis>
 __device__ bool aligned(const Cell& cell1, const Cell& cell2) {
     constexpr int axis1 = (axis + 1) % 3;

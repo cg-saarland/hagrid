@@ -2,6 +2,7 @@
 #define PRIMITIVES_H
 
 #include <cmath>
+#include <cfloat>
 #include "vec.h"
 #include "bbox.h"
 #include "ray.h"
@@ -27,6 +28,129 @@ struct Tri {
         auto v1 = v0 - e1;
         auto v2 = v0 + e2;
         return BBox(min(v0, min(v1, v2)), max(v0, max(v1, v2)));    
+    }
+
+    template <int axis, int axis1, int axis2>
+    HOST DEVICE vec2 clipped_bounds(float min1, float max1, float min2, float max2) const {
+        auto e3 = e1 + e2;
+        auto v1 = v0 - e1;
+        auto v2 = v0 + e2;
+
+        vec2 bounds = vec2(FLT_MAX, FLT_MIN);
+
+        if (get<axis1>(v0) >= min1 && get<axis1>(v0) <= max1 &&
+            get<axis2>(v0) >= min2 && get<axis2>(v0) <= max2) {
+            bounds.x = min(get<axis>(v0), bounds.x);
+            bounds.y = max(get<axis>(v0), bounds.y);
+        }
+        if (get<axis1>(v1) >= min1 && get<axis1>(v1) <= max1 &&
+            get<axis2>(v1) >= min2 && get<axis2>(v1) <= max2) {
+            bounds.x = min(get<axis>(v1), bounds.x);
+            bounds.y = max(get<axis>(v1), bounds.y);
+        }
+        if (get<axis1>(v2) >= min1 && get<axis1>(v2) <= max1 &&
+            get<axis2>(v2) >= min2 && get<axis2>(v2) <= max2) {
+            bounds.x = min(get<axis>(v2), bounds.x);
+            bounds.y = max(get<axis>(v2), bounds.y);
+        }
+
+        auto inv1_e1 = 1.0f / get<axis1>(e1);
+        auto inv1_e2 = 1.0f / get<axis1>(e2);
+        auto inv1_e3 = 1.0f / get<axis1>(e3);
+
+        // Clip on min1
+        {
+            auto tmin1_e1 = (get<axis1>(v0) - min1) * inv1_e1;
+            auto tmin1_e2 = (min1 - get<axis1>(v0)) * inv1_e2;
+            auto tmin1_e3 = (min1 - get<axis1>(v1)) * inv1_e3;
+            if (tmin1_e1 <= 1 && tmin1_e1 >= 0) {
+                auto p = get<axis>(v0) - get<axis>(e1) * tmin1_e1;
+                bounds.x = min(p, bounds.x);
+                bounds.y = max(p, bounds.y);
+            }
+            if (tmin1_e2 <= 1 && tmin1_e2 >= 0) {
+                auto p = get<axis>(v0) + get<axis>(e2) * tmin1_e2;
+                bounds.x = min(p, bounds.x);
+                bounds.y = max(p, bounds.y);
+            }
+            if (tmin1_e3 <= 1 && tmin1_e3 >= 0) {
+                auto p = get<axis>(v1) + get<axis>(e3) * tmin1_e3;
+                bounds.x = min(p, bounds.x);
+                bounds.y = max(p, bounds.y);
+            }
+        }
+
+        // Clip on max1
+        {
+            auto tmax1_e1 = (get<axis1>(v0) - max1) * inv1_e1;
+            auto tmax1_e2 = (max1 - get<axis1>(v0)) * inv1_e2;
+            auto tmax1_e3 = (max1 - get<axis1>(v1)) * inv1_e3;
+            if (tmax1_e1 <= 1 && tmax1_e1 >= 0) {
+                auto p = get<axis>(v0) - get<axis>(e1) * tmax1_e1;
+                bounds.x = min(p, bounds.x);
+                bounds.y = max(p, bounds.y);
+            }
+            if (tmax1_e2 <= 1 && tmax1_e2 >= 0) {
+                auto p = get<axis>(v0) + get<axis>(e2) * tmax1_e2;
+                bounds.x = min(p, bounds.x);
+                bounds.y = max(p, bounds.y);
+            }
+            if (tmax1_e3 <= 1 && tmax1_e3 >= 0) {
+                auto p = get<axis>(v1) + get<axis>(e3) * tmax1_e3;
+                bounds.x = min(p, bounds.x);
+                bounds.y = max(p, bounds.y);
+            }
+        }
+
+        auto inv2_e1 = 1.0f / get<axis2>(e1);
+        auto inv2_e2 = 1.0f / get<axis2>(e2);
+        auto inv2_e3 = 1.0f / get<axis2>(e3);
+
+        // Clip on min2
+        {
+            auto tmin2_e1 = (get<axis2>(v0) - min2) * inv2_e1;
+            auto tmin2_e2 = (min2 - get<axis2>(v0)) * inv2_e2;
+            auto tmin2_e3 = (min2 - get<axis2>(v1)) * inv2_e3;
+            if (tmin2_e1 <= 1 && tmin2_e1 >= 0) {
+                auto p = get<axis>(v0) - get<axis>(e1) * tmin2_e1;
+                bounds.x = min(p, bounds.x);
+                bounds.y = max(p, bounds.y);
+            }
+            if (tmin2_e2 <= 1 && tmin2_e2 >= 0) {
+                auto p = get<axis>(v0) + get<axis>(e2) * tmin2_e2;
+                bounds.x = min(p, bounds.x);
+                bounds.y = max(p, bounds.y);
+            }
+            if (tmin2_e3 <= 1 && tmin2_e3 >= 0) {
+                auto p = get<axis>(v1) + get<axis>(e3) * tmin2_e3;
+                bounds.x = min(p, bounds.x);
+                bounds.y = max(p, bounds.y);
+            }
+        }
+
+        // Clip on max2
+        {
+            auto tmax2_e1 = (get<axis2>(v0) - max2) * inv2_e1;
+            auto tmax2_e2 = (max2 - get<axis2>(v0)) * inv2_e2;
+            auto tmax2_e3 = (max2 - get<axis2>(v1)) * inv2_e3;
+            if (tmax2_e1 <= 1 && tmax2_e1 >= 0) {
+                auto p = get<axis>(v0) - get<axis>(e1) * tmax2_e1;
+                bounds.x = min(p, bounds.x);
+                bounds.y = max(p, bounds.y);
+            }
+            if (tmax2_e2 <= 1 && tmax2_e2 >= 0) {
+                auto p = get<axis>(v0) + get<axis>(e2) * tmax2_e2;
+                bounds.x = min(p, bounds.x);
+                bounds.y = max(p, bounds.y);
+            }
+            if (tmax2_e3 <= 1 && tmax2_e3 >= 0) {
+                auto p = get<axis>(v1) + get<axis>(e3) * tmax2_e3;
+                bounds.x = min(p, bounds.x);
+                bounds.y = max(p, bounds.y);
+            }
+        }
+
+        return bounds;
     }
 
     HOST DEVICE vec3 normal() const {

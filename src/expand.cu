@@ -8,14 +8,6 @@ static __constant__ vec3  cell_size;
 static __constant__ vec3  grid_inv;
 static __constant__ int   grid_shift;
 
-/// Gets the component of the given vector on the specified axis
-template <int axis, typename T>
-__device__ T get(const tvec3<T>& v) {
-    if (axis == 0) return v.x;
-    else if (axis == 1) return v.y;
-    else return v.z;
-}
-
 /// Returns true if an overlap with a neighboring cell is possible
 template <int axis, bool dir>
 __device__ bool overlap_possible(const Cell& cell) {
@@ -23,19 +15,6 @@ __device__ bool overlap_possible(const Cell& cell) {
         return get<axis>(cell.max) < get<axis>(grid_dims);
     else
         return get<axis>(cell.min) > 0;
-}
-
-/// Finds a value in a sorted range of references, returns its index or -1 if not present
-__device__ __forceinline__ int bisection(const int* p, int c, int e) {
-    int a = 0, b = c - 1;
-    while (a <= b) {
-        const int m = (a + b) / 2;
-        const int f = p[m];
-        if (f == e) return m;
-        a = (f < e) ? m + 1 : a;
-        b = (f > e) ? m - 1 : b;
-    }
-    return -1;
 }
 
 /// Determines if the given range of references is a subset of the other
@@ -59,15 +38,16 @@ __device__ __forceinline__ bool is_subset(const int* __restrict__ p0, int c0, co
 /// Computes the amount of overlap possible for a cell and a given primitive
 template <int axis, bool dir, typename Primitive>
 __device__ int compute_overlap(const Primitive& prim, const Cell& cell, const BBox& cell_bbox, int d) {
-    constexpr int axis1 = (axis + 1) % 3;
-    constexpr int axis2 = (axis + 2) % 3;
+    static constexpr int axis1 = (axis + 1) % 3;
+    static constexpr int axis2 = (axis + 2) % 3;
     auto prim_bbox = prim.bbox();
 
     if (get<axis1>(prim_bbox.min) <= get<axis1>(cell_bbox.max) &&
         get<axis1>(prim_bbox.max) >= get<axis1>(cell_bbox.min) &&
         get<axis2>(prim_bbox.min) <= get<axis2>(cell_bbox.max) &&
         get<axis2>(prim_bbox.max) >= get<axis2>(cell_bbox.min)) {
-        int prim_d = get<axis>(((dir ? prim_bbox.min : prim_bbox.max) - grid_min) * grid_inv);
+        // Approximation: here, the clipped bounding box should be used, as it is more precise
+        int prim_d = ((dir ? get<axis>(prim_bbox.min) : get<axis>(prim_bbox.max)) - get<axis>(grid_min)) * get<axis>(grid_inv);
         d = dir
             ? min(d, prim_d - get<axis>(cell.max))
             : max(d, prim_d - get<axis>(cell.min) + 1);
@@ -80,81 +60,83 @@ __device__ int compute_overlap(const Primitive& prim, const Cell& cell, const BB
 template <int axis, bool dir, bool subset_only, typename Primitive>
 __device__ int find_overlap(const Entry* __restrict__ entries,
                             const int* __restrict__ refs,
-                            const Primitive* prims,
+                            const Primitive* __restrict__ prims,
                             const Cell* cells,
                             const Cell& cell) {
     constexpr int axis1 = (axis + 1) % 3;
     constexpr int axis2 = (axis + 2) % 3;
 
-    int d = 0;
-    if (overlap_possible<axis, dir>(cell)) {
-        d = dir ? get<axis>(grid_dims) : -get<axis>(grid_dims);
+    if (!overlap_possible<axis, dir>(cell)) return 0;
 
-        int k1, k2 = get<axis2>(grid_dims);
-        int i = get<axis1>(cell.min);
-        int j = get<axis2>(cell.min);
-        while (true) {
-            ivec3 next_cell;
-            if (axis == 0) next_cell = ivec3(dir ? cell.max.x : cell.min.x - 1, i, j);
-            if (axis == 1) next_cell = ivec3(j, dir ? cell.max.y : cell.min.y - 1, i);
-            if (axis == 2) next_cell = ivec3(i, j, dir ? cell.max.z : cell.min.z - 1);
+    int d = dir ? get<axis>(grid_dims) : -get<axis>(grid_dims);
+    int k1, k2 = get<axis2>(grid_dims);
+    int i = get<axis1>(cell.min);
+    int j = get<axis2>(cell.min);
 
-            auto next = load_cell(cells + lookup_entry(entries, grid_shift, grid_dims >> grid_shift, next_cell));
-            if (subset_only) {
-                if (is_subset(refs + cell.begin, cell.end - cell.begin,
-                              refs + next.begin, next.end - next.begin)) {
-                    d = dir
-                        ? min(d, get<axis>(next.max) - get<axis>(cell.max))
-                        : max(d, get<axis>(next.min) - get<axis>(cell.min));
-                } else {
-                    d = 0;
-                    break;
-                }
-            } else {
-                auto min_bb = grid_min + vec3(cell.min) * cell_size;
-                auto max_bb = grid_min + vec3(cell.max) * cell_size;
+    while (true) {
+        ivec3 next_cell;
+        if (axis == 0) next_cell = ivec3(dir ? cell.max.x : cell.min.x - 1, i, j);
+        if (axis == 1) next_cell = ivec3(j, dir ? cell.max.y : cell.min.y - 1, i);
+        if (axis == 2) next_cell = ivec3(i, j, dir ? cell.max.z : cell.min.z - 1);
+        auto entry = lookup_entry(entries, grid_shift, grid_dims >> grid_shift, next_cell);
+        auto next = load_cell(cells + entry);
 
+        if (subset_only) {
+            if (is_subset(refs + cell.begin, cell.end - cell.begin,
+                          refs + next.begin, next.end - next.begin)) {
                 d = dir
                     ? min(d, get<axis>(next.max) - get<axis>(cell.max))
                     : max(d, get<axis>(next.min) - get<axis>(cell.min));
+            } else {
+                d = 0;
+                break;
+            }
+        } else {
+            d = dir
+                ? min(d, get<axis>(next.max) - get<axis>(cell.max))
+                : max(d, get<axis>(next.min) - get<axis>(cell.min));
 
+            if (next.begin < next.end) {
                 auto cell_bbox = BBox(grid_min + cell_size * vec3(cell.min),
                                       grid_min + cell_size * vec3(cell.max));
 
-                int i = cell.begin, j = next.begin;
-                while (i < cell.end && j < next.end) {
-                    auto a = refs[i];
-                    auto b = refs[j];
-                    if (a < b) {
-                        // Present only in the current cell
-                        i++;
-                    } else if (a > b) {
-                        // Present only in the next cell
-                        d = compute_overlap<axis, dir>(load_prim(prims + b), cell, cell_bbox, d);
-                        if (d == 0) break;
-                        j++;
-                    } else {
-                        // Present in both cells
-                        i++, j++;
+                int p1 = cell.begin, p2 = next.begin;
+                int ref2 = refs[p2];
+                while (true) {
+                    // Skip references that are present in the current cell
+                    while (p1 < cell.end) {
+                        int ref1 = refs[p1];
+
+                        if (ref1  > ref2) break;
+                        if (ref1 == ref2) {
+                            if (++p2 >= next.end) break;
+                            ref2 = refs[p2];
+                        }
+
+                        p1++;
                     }
+
+                    if (p2 >= next.end) break;
+
+                    // Process references that are only present in the next cell
+                    d = compute_overlap<axis, dir>(load_prim(prims + ref2), cell, cell_bbox, d);
+                    if (d == 0 || ++p2 >= next.end) break;
+                    ref2 = refs[p2];
                 }
-
-                while (j < next.end && d != 0)
-                    d = compute_overlap<axis, dir>(load_prim(prims + refs[j++]), cell, cell_bbox, d);
-
-                if (d == 0) break;
             }
 
-            k1 = get<axis1>(next.max) - i;
-            k2 = min(k2, get<axis2>(next.max) - j);
+            if (d == 0) break;
+        }
 
-            i += k1;
-            if (i >= get<axis1>(cell.max)) {
-                i = get<axis1>(cell.min);
-                j += k2;
-                k2 = get<axis2>(grid_dims);
-                if (j >= get<axis2>(cell.max)) break;
-            }
+        k1 = get<axis1>(next.max) - i;
+        k2 = min(k2, get<axis2>(next.max) - j);
+
+        i += k1;
+        if (i >= get<axis1>(cell.max)) {
+            i = get<axis1>(cell.min);
+            j += k2;
+            k2 = get<axis2>(grid_dims);
+            if (j >= get<axis2>(cell.max)) break;
         }
     }
 
@@ -164,7 +146,7 @@ __device__ int find_overlap(const Entry* __restrict__ entries,
 template <int axis, bool last_iter, typename Primitive>
 __global__ void overlap_step(const Entry* __restrict__ entries,
                              const int* __restrict__ refs,
-                             const Primitive* prims,
+                             const Primitive* __restrict__ prims,
                              const Cell* __restrict__ cells,
                              Cell* __restrict__ new_cells,
                              int* __restrict__ cell_flags,
@@ -211,10 +193,12 @@ void expansion_iter(Grid& grid, const Primitive* prims, Cell*& new_cells, int* c
 
 template <typename Primitive>
 void expand(MemManager& mem, Grid& grid, const Primitive* prims, int iters) {
+    if (iters == 0) return;
+
     auto new_cells  = mem.alloc<Cell>(grid.num_cells);
     auto cell_flags = mem.alloc<int>(grid.num_cells);
-    mem.one(cell_flags, grid.num_cells);
 
+    mem.one(cell_flags, grid.num_cells);
     auto extents = grid.bbox.extents();
     auto dims = grid.dims << grid.shift;
     auto cell_size = extents / vec3(dims);

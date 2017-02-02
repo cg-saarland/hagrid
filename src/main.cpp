@@ -3,6 +3,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <chrono>
+#include <fstream>
+#include <numeric>
+#include <limits>
 
 #include <SDL2/SDL.h>
 
@@ -72,6 +75,7 @@ void update_surface(SDL_Surface* surf, std::vector<Hit>& hits, float clip, int w
 
 struct ProgramOptions {
     std::string scene_file;
+    std::string ray_file;
     float top_density, snd_density;
     float alpha;
     int exp_iters;
@@ -79,6 +83,9 @@ struct ProgramOptions {
     float clip, fov;
     int build_iter;
     int build_warmup;
+    int bench_iter;
+    int bench_warmup;
+    float tmin, tmax;
     bool keep_alive;
     bool help;
 
@@ -93,6 +100,10 @@ struct ProgramOptions {
         , fov(60)
         , build_iter(1)
         , build_warmup(0)
+        , bench_iter(1)
+        , bench_warmup(0)
+        , tmin(0)
+        , tmax(std::numeric_limits<float>::max())
         , keep_alive(false)
         , help(false)
     {}
@@ -162,6 +173,21 @@ bool ProgramOptions::parse(int argc, char** argv) {
             build_warmup = strtol(argv[++i], nullptr, 10);
         } else if (matches(arg, "-k", "--keep-alive")) {
             keep_alive = true;
+        } else if (matches(arg, "-r", "--ray-file")) {
+            if (!arg_exists(argv, i, argc)) return false;
+            ray_file = argv[++i];
+        } else if (matches(arg, "-tmin", "--tmin")) {
+            if (!arg_exists(argv, i, argc)) return false;
+            tmin = strtof(argv[++i], nullptr);
+        } else if (matches(arg, "-tmax", "--tmax")) {
+            if (!arg_exists(argv, i, argc)) return false;
+            tmax = strtof(argv[++i], nullptr);
+        } else if (matches(arg, "-n", "--bench-iter")) {
+            if (!arg_exists(argv, i, argc)) return false;
+            bench_iter = strtol(argv[++i], nullptr, 10);
+        } else if (matches(arg, "-w", "--bench-warmup")) {
+            if (!arg_exists(argv, i, argc)) return false;
+            bench_warmup = strtol(argv[++i], nullptr, 10);
         } else {
             std::cerr << "unknown argument: " << arg << std::endl;
             return false;
@@ -202,6 +228,31 @@ static bool load_model(const std::string& file_name, std::vector<Tri>& tris) {
                 }
             }
         }
+    }
+
+    return true;
+}
+
+static bool load_rays(const std::string& file_name, std::vector<Ray>& rays, float tmin, float tmax) {
+    std::ifstream in(file_name, std::ifstream::binary);
+    if (!in) return false;
+
+    in.seekg(0, std::ifstream::end);
+    int count = in.tellg() / (sizeof(float) * 6);
+
+    rays.resize(count);
+    in.seekg(0);
+
+    for (int i = 0; i < count; i++) {
+        float org_dir[6];
+        in.read((char*)org_dir, sizeof(float) * 6);
+        Ray& ray = rays.data()[i];
+
+        ray.org = vec3(org_dir[0], org_dir[1], org_dir[2]);
+        ray.dir = vec3(org_dir[3], org_dir[4], org_dir[5]);
+
+        ray.tmin = tmin;
+        ray.tmax = tmax;
     }
 
     return true;
@@ -256,13 +307,69 @@ static void usage() {
                  "  -sy     --height        sets the viewport height\n"
                  "  -c      --clip          sets the clipping distance\n"
                  "  -f      --fov           sets the field of view\n"
+                 " construction parameters:\n"
                  "  -td     --top-density   sets the top-level density\n"
                  "  -sd     --snd-density   sets the second-level density\n"
                  "  -a      --alpha         sets the cell merging threshold\n"
                  "  -e      --expansion     sets the number of expansion iterations\n"
                  "  -nb     --build-iter    sets the number of build iterations\n"
                  "  -wb     --build-warmup  sets the number of warmup build iterations\n"
-                 "  -k      --keep-alive    keep the buffers alive during construction\n" << std::endl;
+                 "  -k      --keep-alive    keep the buffers alive during construction\n"
+                 " benchmarking:\n"
+                 "  -r      --ray-file      loads rays from a file and enters benchmark mode\n"
+                 "  -tmin   --tmin          sets the minimum distance along every ray\n"
+                 "  -tmax   --tmax          sets the maximum distance along every ray\n"
+                 "  -n      --bench-iter    sets the number of benchmarking iterations\n"
+                 "  -w      --bench-warmup  sets the number of benchmarking warmup iterations\n" << std::endl;
+}
+
+static bool benchmark(MemManager& mem,
+                      const Grid& grid,
+                      const Tri* tris,
+                      const std::string& ray_file,
+                      float tmin, float tmax,
+                      int iter, int warmup) {
+    std::vector<Ray> host_rays;
+    if (!load_rays(ray_file, host_rays, tmin, tmax)) {
+        std::cerr << "cannot load ray file" << std::endl;
+        return false;
+    }
+
+    Ray* rays = mem.alloc<Ray>(host_rays.size());
+    Hit* hits = mem.alloc<Hit>(host_rays.size());
+    mem.copy<Copy::HST_TO_DEV>(rays, host_rays.data(), host_rays.size());
+
+    for (int i = 0; i < warmup; i++) {
+        traverse_grid(grid, tris, rays, hits, host_rays.size());
+    }
+
+    // Benchmark traversal speed
+    std::vector<double> timings;
+    for (int i = 0; i < iter; i++) {
+        auto kernel_time = profile([&] {
+            traverse_grid(grid, tris, rays, hits, host_rays.size());
+        });
+        timings.emplace_back(kernel_time);
+    }
+
+    std::vector<Hit> host_hits(host_rays.size());
+    mem.copy<Copy::DEV_TO_HST>(host_hits.data(), hits, host_hits.size());
+
+    int intr = 0;
+    for (int i = 0; i < host_rays.size(); i++)
+        intr += (host_hits[i].id >= 0);
+
+    std::sort(timings.begin(), timings.end());
+    const double sum = std::accumulate(timings.begin(), timings.end(), 0.0f);
+    const double avg = sum / timings.size();
+    const double med = timings[timings.size() / 2];
+    const double min = *std::min_element(timings.begin(), timings.end());
+    std::cout << intr << " intersection(s)." << std::endl;
+    std::cout << sum << "ms for " << iter << " iteration(s)." << std::endl;
+    std::cout << host_rays.size() * iter / (1000.0 * sum) << " Mrays/sec." << std::endl;
+    std::cout << "# Average: " << avg << " ms" << std::endl;
+    std::cout << "# Median: " << med  << " ms" << std::endl;
+    std::cout << "# Min: " << min << " ms" << std::endl;
 }
 
 int main(int argc, char** argv) {
@@ -344,6 +451,13 @@ int main(int argc, char** argv) {
 
     setup_traversal(grid);
 
+    if (opts.ray_file != "") {
+        std::cout << "entering benchmark mode" << std::endl;
+        if (!benchmark(mem, grid, tris, opts.ray_file, opts.tmin, opts.tmax, opts.bench_iter, opts.bench_warmup))
+            return 1;
+        return 0;
+    }
+
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         std::cerr << "cannot initialize SDL" << std::endl;
         return 1;
@@ -386,7 +500,7 @@ int main(int argc, char** argv) {
         gen_rays(cam, host_rays, opts.clip, opts.width, opts.height);
         mem.copy<Copy::HST_TO_DEV>(rays, host_rays.data(), num_rays);
 
-        kernel_time += profile([&] { traverse(grid, tris, rays, hits, num_rays); });
+        kernel_time += profile([&] { traverse_grid(grid, tris, rays, hits, num_rays); });
         frames++;
 
         if (SDL_GetTicks() - ticks >= 2000) {

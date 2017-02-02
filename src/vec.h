@@ -47,6 +47,12 @@ template <typename T> HOST DEVICE T dot(const tvec2<T>& a, const tvec2<T>& b) { 
 template <typename T> HOST DEVICE T length(const tvec2<T>& a) { return std::sqrt(dot(a, a)); }
 template <typename T> HOST DEVICE tvec2<T> normalize(const tvec2<T>& a) { return a * (1.0f / length(a)); }
 
+template <int axis, typename T>
+HOST DEVICE T get(const tvec2<T>& v) {
+    if (axis == 0) return v.x;
+    return v.y;
+}
+
 template <typename T>
 struct tvec3 {
     union { T x; T r; };
@@ -118,6 +124,13 @@ HOST DEVICE tvec3<T> rotate(const tvec3<T>& v, const tvec3<T>& axis, T angle) {
     return tvec3<T>(p[3] * -q[0] + p[0] *  q[3] + p[1] * -q[2] - p[2] * -q[1],
                     p[3] * -q[1] - p[0] * -q[2] + p[1] *  q[3] + p[2] * -q[0],
                     p[3] * -q[2] + p[0] * -q[1] - p[1] * -q[0] + p[2] *  q[3]);
+}
+
+template <int axis, typename T>
+HOST DEVICE T get(const tvec3<T>& v) {
+    if (axis == 0) return v.x;
+    else if (axis == 1) return v.y;
+    else return v.z;
 }
 
 typedef tvec2<float> vec2;

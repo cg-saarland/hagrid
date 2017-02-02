@@ -23,13 +23,13 @@ __device__ __forceinline__ vec3 compute_voxel(vec3 org, vec3 dir, float t) {
 }
 
 template <typename Primitive>
-__global__ void traverse_grid(const Entry* __restrict__ entries,
-                              const Cell* __restrict__ cells,
-                              const int*  __restrict__ ref_ids,
-                              const Primitive*  __restrict__ prims,
-                              const Ray*  __restrict__ rays,
-                              Hit* __restrict__ hits,
-                              int num_rays) {
+__global__ void traverse(const Entry* __restrict__ entries,
+                         const Cell* __restrict__ cells,
+                         const int*  __restrict__ ref_ids,
+                         const Primitive*  __restrict__ prims,
+                         const Ray*  __restrict__ rays,
+                         Hit* __restrict__ hits,
+                         int num_rays) {
     const int id = threadIdx.x + blockDim.x * blockIdx.x;
     if (id >= num_rays) return;
 
@@ -109,8 +109,8 @@ void setup_traversal(const Grid& grid) {
     set_global(hagrid::grid_shift, &grid.shift);
 }
 
-void traverse(const Grid& grid, const Tri* tris, const Ray* rays, Hit* hits, int num_rays) {
-    traverse_grid<<<round_div(num_rays, 64), 64>>>(grid.entries, grid.cells, grid.ref_ids, tris, rays, hits, num_rays);
+void traverse_grid(const Grid& grid, const Tri* tris, const Ray* rays, Hit* hits, int num_rays) {
+    traverse<<<round_div(num_rays, 64), 64>>>(grid.entries, grid.cells, grid.ref_ids, tris, rays, hits, num_rays);
 }
 
 } // namespace hagrid
