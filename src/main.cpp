@@ -117,7 +117,7 @@ private:
 
     static bool arg_exists(char** argv, int i, int argc) {
         if (i >= argc - 1 || argv[i + 1][0] == '-') {
-            std::cerr << "argument missing for: " << argv[i] << std::endl;
+            std::cerr << "Argument missing for: " << argv[i] << std::endl;
             return false;
         }
         return true;
@@ -131,7 +131,7 @@ bool ProgramOptions::parse(int argc, char** argv) {
 
         if (arg[0] != '-') {
             if (scene_parsed) {
-                std::cerr << "cannot accept more than one model argument" << std::endl;
+                std::cerr << "Cannot accept more than one model on the command line" << std::endl;
                 return false;
             }
             scene_file = arg;
@@ -189,13 +189,13 @@ bool ProgramOptions::parse(int argc, char** argv) {
             if (!arg_exists(argv, i, argc)) return false;
             bench_warmup = strtol(argv[++i], nullptr, 10);
         } else {
-            std::cerr << "unknown argument: " << arg << std::endl;
+            std::cerr << "Unknown argument: " << arg << std::endl;
             return false;
         }
     }
 
     if (!scene_parsed) {
-        std::cerr << "no model specified" << std::endl;
+        std::cerr << "No model specified" << std::endl;
         return false;
     }
 
@@ -300,27 +300,27 @@ bool handle_events(View& view, bool& display_mode) {
 }
 
 static void usage() {
-    std::cout << "usage: hagrid [options] file\n"
-                 "options:\n"
-                 "  -h      --help          shows this message\n"
-                 "  -sx     --width         sets the viewport width\n"
-                 "  -sy     --height        sets the viewport height\n"
-                 "  -c      --clip          sets the clipping distance\n"
-                 "  -f      --fov           sets the field of view\n"
-                 " construction parameters:\n"
-                 "  -td     --top-density   sets the top-level density\n"
-                 "  -sd     --snd-density   sets the second-level density\n"
-                 "  -a      --alpha         sets the cell merging threshold\n"
-                 "  -e      --expansion     sets the number of expansion iterations\n"
-                 "  -nb     --build-iter    sets the number of build iterations\n"
-                 "  -wb     --build-warmup  sets the number of warmup build iterations\n"
-                 "  -k      --keep-alive    keep the buffers alive during construction\n"
-                 " benchmarking:\n"
-                 "  -r      --ray-file      loads rays from a file and enters benchmark mode\n"
-                 "  -tmin   --tmin          sets the minimum distance along every ray\n"
-                 "  -tmax   --tmax          sets the maximum distance along every ray\n"
-                 "  -n      --bench-iter    sets the number of benchmarking iterations\n"
-                 "  -w      --bench-warmup  sets the number of benchmarking warmup iterations\n" << std::endl;
+    std::cout << "Usage: hagrid [options] file\n"
+                 "Options:\n"
+                 "  -h      --help          Shows this message\n"
+                 "  -sx     --width         Sets the viewport width\n"
+                 "  -sy     --height        Sets the viewport height\n"
+                 "  -c      --clip          Sets the clipping distance\n"
+                 "  -f      --fov           Sets the field of view\n"
+                 " Construction parameters:\n"
+                 "  -td     --top-density   Sets the top-level density\n"
+                 "  -sd     --snd-density   Sets the second-level density\n"
+                 "  -a      --alpha         Sets the cell merging threshold\n"
+                 "  -e      --expansion     Sets the number of expansion iterations\n"
+                 "  -nb     --build-iter    Sets the number of build iterations\n"
+                 "  -wb     --build-warmup  Sets the number of warmup build iterations\n"
+                 "  -k      --keep-alive    Keep the buffers alive during construction\n"
+                 " Benchmarking:\n"
+                 "  -r      --ray-file      Loads rays from a file and enters benchmark mode\n"
+                 "  -tmin   --tmin          Sets the minimum distance along every ray\n"
+                 "  -tmax   --tmax          Sets the maximum distance along every ray\n"
+                 "  -n      --bench-iter    Sets the number of benchmarking iterations\n"
+                 "  -w      --bench-warmup  Sets the number of benchmarking warmup iterations\n" << std::endl;
 }
 
 static bool benchmark(MemManager& mem,
@@ -331,7 +331,7 @@ static bool benchmark(MemManager& mem,
                       int iter, int warmup) {
     std::vector<Ray> host_rays;
     if (!load_rays(ray_file, host_rays, tmin, tmax)) {
-        std::cerr << "cannot load ray file" << std::endl;
+        std::cerr << "Cannot load ray file" << std::endl;
         return false;
     }
 
@@ -388,7 +388,7 @@ int main(int argc, char** argv) {
 
     std::vector<Tri> host_tris;
     if (!load_model(opts.scene_file, host_tris)) {
-        std::cerr << "scene cannot be loaded (file not present or contains errors)" << std::endl;
+        std::cerr << "Scene cannot be loaded (file not present or contains errors)" << std::endl;
         return 1;
     }
 
@@ -429,37 +429,39 @@ int main(int argc, char** argv) {
         total_time += kernel_time;
     }
     auto dims = grid.dims << grid.shift;
-    std::cout << "grid built in " << total_time / opts.build_iter << " ms ("
+    std::cout << "Grid built in " << total_time / opts.build_iter << " ms ("
               << dims.x << "x" << dims.y << "x" << dims.z << ", "
               << grid.num_cells << " cells, " << grid.num_refs << " references)" << std::endl;
 
+#ifndef NDEBUG
     std::cout << std::endl;
     mem.debug_slots();
     std::cout << std::endl;
+#endif
 
     const size_t cells_mem = grid.num_cells * sizeof(Cell);
     const size_t entries_mem = grid.num_entries * sizeof(int);
     const size_t refs_mem = grid.num_refs * sizeof(int);
     const size_t tris_mem = host_tris.size() * sizeof(Tri);
     const size_t total_mem = cells_mem + entries_mem + refs_mem + tris_mem;
-    std::cout << "total memory: " << total_mem / double(1024 * 1024) << " MB" << std::endl;
-    std::cout << "cells: " << cells_mem / double(1024 * 1024) << " MB" << std::endl;
-    std::cout << "entries: " << entries_mem / double(1024 * 1024) << " MB" << std::endl;
-    std::cout << "references: " << refs_mem / double(1024 * 1024) << " MB" << std::endl;
-    std::cout << "triangles: " << tris_mem / double(1024 * 1024) << " MB" << std::endl;
-    std::cout << "peak usage: " << mem.max_usage() / double(1024.0 * 1024.0) << " MB" << std::endl;
+    std::cout << "Total memory: " << total_mem / double(1024 * 1024) << " MB" << std::endl;
+    std::cout << "Cells: " << cells_mem / double(1024 * 1024) << " MB" << std::endl;
+    std::cout << "Entries: " << entries_mem / double(1024 * 1024) << " MB" << std::endl;
+    std::cout << "References: " << refs_mem / double(1024 * 1024) << " MB" << std::endl;
+    std::cout << "Triangles: " << tris_mem / double(1024 * 1024) << " MB" << std::endl;
+    std::cout << "Peak usage: " << mem.max_usage() / double(1024.0 * 1024.0) << " MB" << std::endl;
 
     setup_traversal(grid);
 
     if (opts.ray_file != "") {
-        std::cout << "entering benchmark mode" << std::endl;
+        std::cout << "Entering benchmark mode" << std::endl;
         if (!benchmark(mem, grid, tris, opts.ray_file, opts.tmin, opts.tmax, opts.bench_iter, opts.bench_warmup))
             return 1;
         return 0;
     }
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-        std::cerr << "cannot initialize SDL" << std::endl;
+        std::cerr << "Cannot initialize SDL" << std::endl;
         return 1;
     }
 

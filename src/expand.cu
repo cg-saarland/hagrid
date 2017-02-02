@@ -46,7 +46,7 @@ __device__ int compute_overlap(const Primitive& prim, const Cell& cell, const BB
         get<axis1>(prim_bbox.max) >= get<axis1>(cell_bbox.min) &&
         get<axis2>(prim_bbox.min) <= get<axis2>(cell_bbox.max) &&
         get<axis2>(prim_bbox.max) >= get<axis2>(cell_bbox.min)) {
-        // Approximation: here, the clipped bounding box should be used, as it is more precise
+        // Approximation: use the original bounding box, not the clipped one
         int prim_d = ((dir ? get<axis>(prim_bbox.min) : get<axis>(prim_bbox.max)) - get<axis>(grid_min)) * get<axis>(grid_inv);
         d = dir
             ? min(d, prim_d - get<axis>(cell.max))
