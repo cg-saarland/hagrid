@@ -58,8 +58,8 @@ __device__ __forceinline__ int count_union(const int* __restrict__ p0, int c0,
                                            const int* __restrict__ p1, int c1) {
     int i = 0, j = 0, c = 0;
     while (i < c0 & j < c1) {
-        const int a = p0[i];
-        const int b = p1[j];
+        auto a = p0[i];
+        auto b = p1[j];
         i += (a <= b);
         j += (a >= b);
         c++;
@@ -70,18 +70,20 @@ __device__ __forceinline__ int count_union(const int* __restrict__ p0, int c0,
 /// Merges the two sorted reference arrays
 __device__ __forceinline__ void merge_refs(const int* __restrict__ p0, int c0,
                                            const int* __restrict__ p1, int c1,
-                                           int* __restrict__ q1) {
+                                           int* __restrict__ q) {
     int i = 0;
     int j = 0;
     while (i < c0 && j < c1) {
-        const int a = p0[i];
-        const int b = p1[j];
-        *(q1++) = (a < b) ? a : b;
+        auto a = p0[i];
+        auto b = p1[j];
+        *(q++) = (a < b) ? a : b;
         i += (a <= b);
         j += (a >= b);
     }
-    while (i < c0) *(q1++) = p0[i++];
-    while (j < c1) *(q1++) = p1[j++];
+    auto k = i < c0 ? i  :  j;
+    auto c = i < c0 ? c0 : c1;
+    auto p = i < c0 ? p0 : p1;
+    while (k < c) *(q++) = p[k++];
 }
 
 /// Computes the number of references per cell after the merge
@@ -346,9 +348,9 @@ void merge_grid(MemManager& mem, Grid& grid, float alpha) {
     auto dims = grid.dims << grid.shift;
     auto cell_size = extents / vec3(dims);
 
-    set_global(hagrid::grid_dims,  &dims);
-    set_global(hagrid::cell_size,  &cell_size);
-    set_global(hagrid::grid_shift, &grid.shift);
+    set_global(hagrid::grid_dims,  dims);
+    set_global(hagrid::cell_size,  cell_size);
+    set_global(hagrid::grid_shift, grid.shift);
 
     if (alpha > 0) {
         int prev_num_cells = 0, iter = 0;

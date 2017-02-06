@@ -108,10 +108,19 @@ __host__ static void check_cuda_call(cudaError_t err, const char* file, int line
 }
 
 template <typename T>
-__host__ void set_global(T& symbol, const T* ptr) {
+__host__ void set_global(T& symbol, const T& val) {
     size_t size;
     CHECK_CUDA_CALL(cudaGetSymbolSize(&size, symbol));
-    CHECK_CUDA_CALL(cudaMemcpyToSymbol(symbol, ptr, size));
+    CHECK_CUDA_CALL(cudaMemcpyToSymbol(symbol, &val, size));
+}
+
+template <typename T>
+__host__ T get_global(const T& symbol) {
+    size_t size;
+    T val;
+    CHECK_CUDA_CALL(cudaGetSymbolSize(&size, symbol));
+    CHECK_CUDA_CALL(cudaMemcpyFromSymbol(&val, symbol, size));
+    return val;
 }
 #endif // __NVCC__
 

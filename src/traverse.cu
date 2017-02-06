@@ -101,12 +101,12 @@ void setup_traversal(const Grid& grid) {
     auto grid_inv  = vec3(dims) / extents;
     auto cell_size = extents / vec3(dims);
 
-    set_global(hagrid::grid_min,   &grid.bbox.min);
-    set_global(hagrid::grid_max,   &grid.bbox.max);
-    set_global(hagrid::grid_dims,  &dims);
-    set_global(hagrid::cell_size,  &cell_size);
-    set_global(hagrid::grid_inv,   &grid_inv);
-    set_global(hagrid::grid_shift, &grid.shift);
+    set_global(hagrid::grid_min,   grid.bbox.min);
+    set_global(hagrid::grid_max,   grid.bbox.max);
+    set_global(hagrid::grid_dims,  dims);
+    set_global(hagrid::cell_size,  cell_size);
+    set_global(hagrid::grid_inv,   grid_inv);
+    set_global(hagrid::grid_shift, grid.shift);
 }
 
 void traverse_grid(const Grid& grid, const Tri* tris, const Ray* rays, Hit* hits, int num_rays) {

@@ -62,7 +62,8 @@ __device__ int find_overlap(const Entry* __restrict__ entries,
                             const int* __restrict__ refs,
                             const Primitive* __restrict__ prims,
                             const Cell* cells,
-                            const Cell& cell) {
+                            const Cell& cell,
+                            bool& continue_overlap) {
     constexpr int axis1 = (axis + 1) % 3;
     constexpr int axis2 = (axis + 2) % 3;
 
@@ -72,7 +73,7 @@ __device__ int find_overlap(const Entry* __restrict__ entries,
     int k1, k2 = get<axis2>(grid_dims);
     int i = get<axis1>(cell.min);
     int j = get<axis2>(cell.min);
-
+    int max_d = d;
     while (true) {
         ivec3 next_cell;
         if (axis == 0) next_cell = ivec3(dir ? cell.max.x : cell.min.x - 1, i, j);
@@ -82,19 +83,19 @@ __device__ int find_overlap(const Entry* __restrict__ entries,
         auto next = load_cell(cells + entry);
 
         if (subset_only) {
-            if (is_subset(refs + cell.begin, cell.end - cell.begin,
-                          refs + next.begin, next.end - next.begin)) {
-                d = dir
-                    ? min(d, get<axis>(next.max) - get<axis>(cell.max))
-                    : max(d, get<axis>(next.min) - get<axis>(cell.min));
-            } else {
+            d = dir
+                ? min(d, get<axis>(next.max) - get<axis>(cell.max))
+                : max(d, get<axis>(next.min) - get<axis>(cell.min));
+            if (!is_subset(refs + cell.begin, cell.end - cell.begin,
+                           refs + next.begin, next.end - next.begin)) {
                 d = 0;
                 break;
             }
         } else {
-            d = dir
-                ? min(d, get<axis>(next.max) - get<axis>(cell.max))
-                : max(d, get<axis>(next.min) - get<axis>(cell.min));
+            max_d = dir
+                ? min(max_d, get<axis>(next.max) - get<axis>(cell.max))
+                : max(max_d, get<axis>(next.min) - get<axis>(cell.min));
+            d = dir ? min(d, max_d) : max(d, max_d);
 
             if (next.begin < next.end) {
                 auto cell_bbox = BBox(grid_min + cell_size * vec3(cell.min),
@@ -140,6 +141,7 @@ __device__ int find_overlap(const Entry* __restrict__ entries,
         }
     }
 
+    continue_overlap |= d == max_d;
     return d;
 }
 
@@ -152,13 +154,13 @@ __global__ void overlap_step(const Entry* __restrict__ entries,
                              int* __restrict__ cell_flags,
                              int num_cells) {
     int id = threadIdx.x + blockDim.x * blockIdx.x;
-    if (id >= num_cells || (!last_iter && (cell_flags[id] & (1 << axis)) == 0))
+    if (id >= num_cells || (cell_flags[id] & (1 << axis)) == 0)
         return;
 
     auto cell = load_cell(cells + id);
-    auto ov1 = find_overlap<axis, false, !last_iter>(entries, refs, prims, cells, cell);
-    auto ov2 = find_overlap<axis, true,  !last_iter>(entries, refs, prims, cells, cell);
-    auto k = ov2 - ov1 ? 1 : 0;
+    bool flag = false;
+    auto ov1 = find_overlap<axis, false, !last_iter>(entries, refs, prims, cells, cell, flag);
+    auto ov2 = find_overlap<axis, true,  !last_iter>(entries, refs, prims, cells, cell, flag);
 
     if (axis == 0) {
         cell.min.x += ov1;
@@ -176,7 +178,7 @@ __global__ void overlap_step(const Entry* __restrict__ entries,
     }
 
     // If the cell has not been expanded, we will not process it next time
-    if (!last_iter) cell_flags[id] = (k << axis) | (cell_flags[id] & ~(1 << axis));
+    cell_flags[id] = (flag ? 1 << axis : 0) | (cell_flags[id] & ~(1 << axis));
 
     store_cell(new_cells + id, cell);
 }
@@ -204,14 +206,14 @@ void expand(MemManager& mem, Grid& grid, const Primitive* prims, int iters) {
     auto cell_size = extents / vec3(dims);
     auto grid_inv = vec3(dims) / extents;
 
-    set_global(hagrid::grid_dims,  &dims);
-    set_global(hagrid::grid_min,   &grid.bbox.min);
-    set_global(hagrid::cell_size,  &cell_size);
-    set_global(hagrid::grid_inv,   &grid_inv);
-    set_global(hagrid::grid_shift, &grid.shift);
+    set_global(hagrid::grid_dims,  dims);
+    set_global(hagrid::grid_min,   grid.bbox.min);
+    set_global(hagrid::cell_size,  cell_size);
+    set_global(hagrid::grid_inv,   grid_inv);
+    set_global(hagrid::grid_shift, grid.shift);
 
     for (int i = 0; i < iters - 1; i++)
-        expansion_iter<false>(grid, prims, new_cells, cell_flags);
+        expansion_iter<true>(grid, prims, new_cells, cell_flags);
     expansion_iter<true>(grid, prims, new_cells, cell_flags);
 
     mem.free(cell_flags);

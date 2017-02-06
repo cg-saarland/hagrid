@@ -507,8 +507,8 @@ void first_build_iter(MemManager& mem, float snd_density,
     grid_shift = par.reduce(log_dims, num_top_cells, log_dims + num_top_cells, [] __device__ (int a, int b) { return max(a, b); });
     auto cell_size = grid_bb.extents() / vec3(dims << grid_shift);
 
-    set_global(hagrid::grid_shift, &grid_shift);
-    set_global(hagrid::cell_size,  &cell_size);
+    set_global(hagrid::grid_shift, grid_shift);
+    set_global(hagrid::cell_size,  cell_size);
 
     // Emission of the new cells
     auto new_cells   = mem.alloc<Cell >(num_top_cells + 0);
@@ -736,8 +736,8 @@ void build(MemManager& mem, const Primitive* prims, int num_prims, Grid& grid, f
     grid_bb.min -= extents * 0.001f;
     grid_bb.max += extents * 0.001f;
 
-    set_global(hagrid::grid_dims, &dims);
-    set_global(hagrid::grid_bbox, &grid_bb);
+    set_global(hagrid::grid_dims, dims);
+    set_global(hagrid::grid_bbox, grid_bb);
 
     int* log_dims = nullptr;
     int grid_shift = 0;

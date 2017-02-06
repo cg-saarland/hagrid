@@ -7,6 +7,7 @@ endif()
 cuda_compile(HAGRID_BUILD
     build.cu
     merge.cu
+    flatten.cu
     expand.cu
     mem_manager.cu
     profile.cu

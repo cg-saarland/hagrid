@@ -411,6 +411,7 @@ int main(int argc, char** argv) {
 
         build_grid(mem, tris, host_tris.size(), grid, opts.top_density, opts.snd_density);
         merge_grid(mem, grid, opts.alpha);
+        flatten_grid(mem, grid);
         expand_grid(mem, grid, tris, opts.exp_iters);
     }
 
@@ -424,6 +425,7 @@ int main(int argc, char** argv) {
         auto kernel_time = profile([&] {
             build_grid(mem, tris, host_tris.size(), grid, opts.top_density, opts.snd_density);
             merge_grid(mem, grid, opts.alpha);
+            flatten_grid(mem, grid);
             expand_grid(mem, grid, tris, opts.exp_iters);
         });
         total_time += kernel_time;
