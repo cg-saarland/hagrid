@@ -309,7 +309,6 @@ void merge_iteration(MemManager& mem, Grid& grid, Cell*& new_cells, int*& new_re
     int num_new_refs  = par.scan(bufs.ref_counts, num_cells + 1, bufs.ref_scan);
     int num_new_cells = par.scan(bufs.cell_flags, num_cells + 1, bufs.cell_scan);
 
-    DEBUG_SYNC();
     merge<axis><<<round_div(num_cells, 64), 64>>>(entries, cells, refs,
                                                   bufs.cell_scan, bufs.ref_scan,
                                                   bufs.merge_counts, bufs.new_cell_ids,

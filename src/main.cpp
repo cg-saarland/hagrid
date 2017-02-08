@@ -92,7 +92,7 @@ struct ProgramOptions {
     ProgramOptions()
         : top_density(0.12f)
         , snd_density(2.4f)
-        , alpha(1)
+        , alpha(0.995f)
         , exp_iters(3)
         , width(1024)
         , height(1024)

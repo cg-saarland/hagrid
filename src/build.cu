@@ -716,7 +716,6 @@ void concat_levels(MemManager& mem, std::vector<Level>& levels, Grid& grid) {
 
 template <typename Primitive>
 void build(MemManager& mem, const Primitive* prims, int num_prims, Grid& grid, float top_density, float snd_density) {
-    assert(params.valid());
     Parallel par(mem);
 
     // Allocate a bounding box for each primitive + one for the global bounding box

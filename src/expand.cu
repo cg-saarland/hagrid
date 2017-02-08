@@ -145,7 +145,7 @@ __device__ int find_overlap(const Entry* __restrict__ entries,
     return d;
 }
 
-template <int axis, bool last_iter, typename Primitive>
+template <int axis, typename Primitive>
 __global__ void overlap_step(const Entry* __restrict__ entries,
                              const int* __restrict__ refs,
                              const Primitive* __restrict__ prims,
@@ -159,8 +159,9 @@ __global__ void overlap_step(const Entry* __restrict__ entries,
 
     auto cell = load_cell(cells + id);
     bool flag = false;
-    auto ov1 = find_overlap<axis, false, !last_iter>(entries, refs, prims, cells, cell, flag);
-    auto ov2 = find_overlap<axis, true,  !last_iter>(entries, refs, prims, cells, cell, flag);
+    constexpr bool subset_only = true;
+    auto ov1 = find_overlap<axis, false, subset_only>(entries, refs, prims, cells, cell, flag);
+    auto ov2 = find_overlap<axis, true,  subset_only>(entries, refs, prims, cells, cell, flag);
 
     if (axis == 0) {
         cell.min.x += ov1;
@@ -183,13 +184,13 @@ __global__ void overlap_step(const Entry* __restrict__ entries,
     store_cell(new_cells + id, cell);
 }
 
-template <bool last_iter, typename Primitive>
+template <typename Primitive>
 void expansion_iter(Grid& grid, const Primitive* prims, Cell*& new_cells, int* cell_flags) {
-    overlap_step<0, last_iter><<<round_div(grid.num_cells, 64), 64>>>(grid.entries, grid.ref_ids, prims, grid.cells, new_cells, cell_flags, grid.num_cells);
+    overlap_step<0><<<round_div(grid.num_cells, 64), 64>>>(grid.entries, grid.ref_ids, prims, grid.cells, new_cells, cell_flags, grid.num_cells);
     std::swap(new_cells, grid.cells);
-    overlap_step<1, last_iter><<<round_div(grid.num_cells, 64), 64>>>(grid.entries, grid.ref_ids, prims, grid.cells, new_cells, cell_flags, grid.num_cells);
+    overlap_step<1><<<round_div(grid.num_cells, 64), 64>>>(grid.entries, grid.ref_ids, prims, grid.cells, new_cells, cell_flags, grid.num_cells);
     std::swap(new_cells, grid.cells);
-    overlap_step<2, last_iter><<<round_div(grid.num_cells, 64), 64>>>(grid.entries, grid.ref_ids, prims, grid.cells, new_cells, cell_flags, grid.num_cells);
+    overlap_step<2><<<round_div(grid.num_cells, 64), 64>>>(grid.entries, grid.ref_ids, prims, grid.cells, new_cells, cell_flags, grid.num_cells);
     std::swap(new_cells, grid.cells);
 }
 
@@ -212,9 +213,8 @@ void expand(MemManager& mem, Grid& grid, const Primitive* prims, int iters) {
     set_global(hagrid::grid_inv,   grid_inv);
     set_global(hagrid::grid_shift, grid.shift);
 
-    for (int i = 0; i < iters - 1; i++)
-        expansion_iter<true>(grid, prims, new_cells, cell_flags);
-    expansion_iter<true>(grid, prims, new_cells, cell_flags);
+    for (int i = 0; i < iters; i++)
+        expansion_iter(grid, prims, new_cells, cell_flags);
 
     mem.free(cell_flags);
     mem.free(new_cells);
