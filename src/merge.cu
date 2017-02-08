@@ -6,6 +6,7 @@ namespace hagrid {
 /// Structure that contains buffers used during merging
 struct MergeBuffers {
     int* merge_counts;  ///< Contains the number of references in each cell (positive if merged, otherwise negative)
+    int* prevs, *nexts; ///< Contains the index of the previous/next neighboring cell on the merging axis (positive if merged, otherwise negative)
     int* ref_counts;    ///< Contains the number of references per cell after merge
     int* cell_flags;    ///< Contains 1 if the cell is kept (it is not a residue), otherwise 0
     int* cell_scan;     ///< Scan over cell_flags (insertion position of the cells into the new cell array)
@@ -92,6 +93,8 @@ __global__ void compute_merge_counts(const Entry* __restrict__ entries,
                                      const Cell* __restrict__  cells,
                                      const int* __restrict__   refs,
                                      int* __restrict__ merge_counts,
+                                     int* __restrict__ nexts,
+                                     int* __restrict__ prevs,
                                      int empty_mask,
                                      int num_cells) {
     int id = threadIdx.x + blockDim.x * blockIdx.x;
@@ -102,10 +105,12 @@ __global__ void compute_merge_counts(const Entry* __restrict__ entries,
     auto cell1 = load_cell(cells + id);
     auto next_pos = next_cell<axis>(cell1.min, cell1.max);
     int count = -(cell1.end - cell1.begin + 1);
+    int next_id = -1;
 
     if (merge_allowed(empty_mask, get<axis>(cell1.min)) &&
         get<axis>(next_pos) < get<axis>(grid_dims)) {
-        auto cell2 = load_cell(cells + lookup_entry(entries, grid_shift, grid_dims >> grid_shift, next_pos));
+        next_id = lookup_entry(entries, grid_shift, grid_dims >> grid_shift, next_pos);
+        auto cell2 = load_cell(cells + next_id);
 
         if (aligned<axis>(cell1, cell2)) {
             auto e1 = vec3(cell1.max - cell1.min) * cell_size;
@@ -130,47 +135,36 @@ __global__ void compute_merge_counts(const Entry* __restrict__ entries,
     }
     
     merge_counts[id] = count;
+
+    next_id = count >= 0 ? next_id : -1;
+    nexts[id] = next_id;
+    if (next_id >= 0) prevs[next_id] = id;
 }
 
 /// Traverses the merge chains and mark the cells at odd positions as residue
 template <int axis>
-__global__ void compute_cell_flags(const Entry* __restrict__ entries,
-                                   const Cell* __restrict__ cells,
-                                   const int* __restrict__ merge_counts,
+__global__ void compute_cell_flags(const int* __restrict__ nexts,
+                                   const int* __restrict__ prevs,
                                    int* __restrict__ cell_flags,
                                    int num_cells) {
     int id = threadIdx.x + blockDim.x * blockIdx.x;
     if (id >= num_cells) return;
 
-    auto cell = load_cell(cells + id);
-    auto prev_pos = prev_cell<axis>(cell.min);
-
     // If the previous cell does not exist or does not want to merge with this cell
-    if (get<axis>(prev_pos) < 0 || merge_counts[lookup_entry(entries, grid_shift, grid_dims >> grid_shift, prev_pos)] < 0) {
-        // Set the flag of this cell to 1
+    if (prevs[id] < 0) {
+        int next_id = nexts[id];
         cell_flags[id] = 1;
 
         // If this cell wants to merge with the next
-        if (merge_counts[id] >= 0) {
-            auto cur_min = cell.min;
-            auto cur_max = cell.max;
+        if (next_id >= 0) {
             int count = 1;
 
             // Traverse the merge chain
-            while (true) {
-                auto next_pos = next_cell<axis>(cur_min, cur_max);
-                if (get<axis>(next_pos) >= get<axis>(grid_dims)) break;
-                auto next_id = lookup_entry(entries, grid_shift, grid_dims >> grid_shift, next_pos);
-
+            do {
                 cell_flags[next_id] = count % 2 ? 0 : 1;
-
-                // Exit if the next cell is the end of the chain
-                if (merge_counts[next_id] < 0) break;
-                auto next_cell = load_cell(cells + next_id);
-                cur_min = next_cell.min;
-                cur_max = next_cell.max;
+                next_id = nexts[next_id];
                 count++;
-            }
+            } while (next_id >= 0);
         }
     }
 }
@@ -299,9 +293,10 @@ void merge_iteration(MemManager& mem, Grid& grid, Cell*& new_cells, int*& new_re
     auto refs    = grid.ref_ids;
     auto entries = grid.entries;
 
-    compute_merge_counts<axis><<<round_div(num_cells, 64), 64>>>(entries, cells, refs, bufs.merge_counts, empty_mask, num_cells);
+    mem.one(bufs.prevs, num_cells);
+    compute_merge_counts<axis><<<round_div(num_cells, 64), 64>>>(entries, cells, refs, bufs.merge_counts, bufs.nexts, bufs.prevs, empty_mask, num_cells);
     DEBUG_SYNC();
-    compute_cell_flags<axis><<<round_div(num_cells, 64), 64>>>(entries, cells, bufs.merge_counts, bufs.cell_flags, num_cells);
+    compute_cell_flags<axis><<<round_div(num_cells, 64), 64>>>(bufs.nexts, bufs.prevs, bufs.cell_flags, num_cells);
     DEBUG_SYNC();
     compute_ref_counts<<<round_div(num_cells, 64), 64>>>(bufs.merge_counts, bufs.cell_flags, bufs.ref_counts, num_cells);
     DEBUG_SYNC();
@@ -342,6 +337,8 @@ void merge_grid(MemManager& mem, Grid& grid, float alpha) {
     bufs.cell_scan    = mem.alloc<int>(buf_size);
     bufs.ref_scan     = mem.alloc<int>(buf_size);
     bufs.new_cell_ids = bufs.cell_flags;
+    bufs.prevs        = bufs.cell_scan;
+    bufs.nexts        = bufs.ref_scan;
 
     auto extents = grid.bbox.extents();
     auto dims = grid.dims << grid.shift;
