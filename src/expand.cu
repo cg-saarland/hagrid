@@ -82,21 +82,18 @@ __device__ int find_overlap(const Entry* __restrict__ entries,
         auto entry = lookup_entry(entries, grid_shift, grid_dims >> grid_shift, next_cell);
         auto next = load_cell(cells + entry);
 
+        max_d = dir
+            ? min(max_d, get<axis>(next.max) - get<axis>(cell.max))
+            : max(max_d, get<axis>(next.min) - get<axis>(cell.min));
+        d = dir ? min(d, max_d) : max(d, max_d);
+
         if (subset_only) {
-            d = dir
-                ? min(d, get<axis>(next.max) - get<axis>(cell.max))
-                : max(d, get<axis>(next.min) - get<axis>(cell.min));
             if (!is_subset(refs + cell.begin, cell.end - cell.begin,
                            refs + next.begin, next.end - next.begin)) {
                 d = 0;
                 break;
             }
         } else {
-            max_d = dir
-                ? min(max_d, get<axis>(next.max) - get<axis>(cell.max))
-                : max(max_d, get<axis>(next.min) - get<axis>(cell.min));
-            d = dir ? min(d, max_d) : max(d, max_d);
-
             if (next.begin < next.end) {
                 auto cell_bbox = BBox(grid_min + cell_size * vec3(cell.min),
                                       grid_min + cell_size * vec3(cell.max));
