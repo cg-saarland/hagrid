@@ -171,9 +171,9 @@ __global__ void compute_cell_flags(const int* __restrict__ nexts,
 
 /// Computes the number of new references per cell
 __global__ void compute_ref_counts(const int* __restrict__ merge_counts,
-                                    const int* __restrict__ cell_flags,
-                                    int* __restrict__ ref_counts,
-                                    int num_cells) {
+                                   const int* __restrict__ cell_flags,
+                                   int* __restrict__ ref_counts,
+                                   int num_cells) {
     int id = threadIdx.x + blockDim.x * blockIdx.x;
     if (id >= num_cells) return;
 
@@ -242,24 +242,29 @@ __global__ void merge(const Entry* __restrict__ entries,
                                             new_max, new_refs_end));
     }
 
-    // Copy the original references into the new array, using blocking
+    int warp_id = threadIdx.x % 32;
     bool merge = next_begin < next_end;
-    auto blocked = (cell_end - cell_begin) >= 10;
-    auto mask = __ballot(!merge & blocked);
-    while (mask) {
-        int bit = __ffs(mask) - 1;
-        mask &= ~(1 << bit);
 
-        auto begin = __shfl(cell_begin, bit);
-        auto end   = __shfl(cell_end,   bit);
-        auto warp_id = id % 32;
+    // Process consecutive ranges of cells that do not want to be merged
+    uint32_t merge_mask = __ballot(valid & !merge);
+    uint32_t full_mask  = __ballot(cell_begin < cell_end);
+    while (merge_mask) {
+        // Find the range of cells [first_bit, last_bit] that are not merged
+        auto first_bit = __ffs(merge_mask) - 1;
+        auto shift_mask = ~(merge_mask >> first_bit);
+        auto last_bit  = shift_mask ? __ffs(shift_mask) + first_bit - 2 : first_bit;
+        merge_mask &= ~((1 << (last_bit + 1)) - 1);
 
-        for (int i = begin + warp_id, j = __shfl(new_refs_begin, bit) + warp_id; i < end; i += 32, j += 32)
-            new_refs[j] = refs[i];
-    }
+        // Skip cells that do not contain references
+        shift_mask = full_mask >> first_bit;
+        if (!shift_mask) continue;
+        first_bit += __ffs(shift_mask) - 1;
+        last_bit  -= __clz(full_mask << (31 - last_bit));
 
-    if (!merge & !blocked) {
-        for (int i = cell_begin, j = new_refs_begin; i < cell_end; i++, j++)
+        auto begin     = __shfl(cell_begin,     first_bit);
+        auto end       = __shfl(cell_end,       last_bit);
+        auto new_begin = __shfl(new_refs_begin, first_bit);
+        for (int i = begin + warp_id, j = new_begin + warp_id; i < end; i += 32, j += 32)
             new_refs[j] = refs[i];
     }
 
