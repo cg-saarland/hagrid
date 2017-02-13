@@ -185,10 +185,15 @@ template <typename Primitive>
 void expansion_iter(Grid& grid, const Primitive* prims, Cell*& new_cells, int* cell_flags) {
     overlap_step<0><<<round_div(grid.num_cells, 64), 64>>>(grid.entries, grid.ref_ids, prims, grid.cells, new_cells, cell_flags, grid.num_cells);
     std::swap(new_cells, grid.cells);
+    DEBUG_SYNC();
+
     overlap_step<1><<<round_div(grid.num_cells, 64), 64>>>(grid.entries, grid.ref_ids, prims, grid.cells, new_cells, cell_flags, grid.num_cells);
     std::swap(new_cells, grid.cells);
+    DEBUG_SYNC();
+
     overlap_step<2><<<round_div(grid.num_cells, 64), 64>>>(grid.entries, grid.ref_ids, prims, grid.cells, new_cells, cell_flags, grid.num_cells);
     std::swap(new_cells, grid.cells);
+    DEBUG_SYNC();
 }
 
 template <typename Primitive>
