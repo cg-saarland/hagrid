@@ -370,6 +370,8 @@ static bool benchmark(MemManager& mem,
     std::cout << "# Average: " << avg << " ms" << std::endl;
     std::cout << "# Median: " << med  << " ms" << std::endl;
     std::cout << "# Min: " << min << " ms" << std::endl;
+
+    return true;
 }
 
 int main(int argc, char** argv) {
