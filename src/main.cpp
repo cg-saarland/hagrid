@@ -516,8 +516,8 @@ int main(int argc, char** argv) {
 
     std::cout << "Entering interactive mode\n"
                  "Commands:\n"
-                 "  mouse, arrow keys  Move the camera\n"
-                 "  numpad '+'/'-'     Control camera movement speed\n"
+                 "  Mouse, arrow keys  Move the camera\n"
+                 "  Numpad '+'/'-'     Control camera movement speed\n"
                  "  'm'                Cycle through display modes\n"
                  "  'c'                Prints the camera position" << std::endl;
 
