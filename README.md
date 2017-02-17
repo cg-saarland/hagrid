@@ -1,5 +1,7 @@
 # Hagrid
 
+![Screenshot](screenshot.png)
+
 This project is an implementation of the paper: _GPU Ray Tracing using Irregular Grids_.
 This is not the version that has been used in the paper.
 
