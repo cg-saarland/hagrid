@@ -39,6 +39,10 @@ struct BBox {
         return max - min;
     }
 
+    HOST DEVICE vec3 center() const {
+        return 0.5f * (max + min);
+    }
+
     HOST DEVICE float half_area() const {
         const vec3 len = max - min;
         const float kx = hagrid::max(len.x, 0.0f);

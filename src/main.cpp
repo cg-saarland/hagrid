@@ -503,6 +503,7 @@ int main(int argc, char** argv) {
 
     // Compute a clipping distance from the bounding box of the scene
     auto scene_size = length(grid.bbox.extents());
+    auto scene_center = grid.bbox.center();
     if (opts.clip <= 0) {
         opts.clip = scene_size;
     }
@@ -536,7 +537,7 @@ int main(int argc, char** argv) {
     SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
 
     View view = {
-        vec3(0.0f,  0.0f, -10.0f),   // Eye
+        scene_center,                // Eye
         vec3(0.0f,  0.0f, 1.0f),     // Forward
         vec3(-1.0f, 0.0f, 0.0f),     // Right
         vec3(0.0f,  1.0f, 0.0f),     // Up
