@@ -133,7 +133,7 @@ struct ProgramOptions {
         , exp_iters(3)
         , width(1024)
         , height(1024)
-        , clip(100)
+        , clip(0)
         , fov(60)
         , build_iter(1)
         , build_warmup(0)
@@ -501,12 +501,25 @@ int main(int argc, char** argv) {
 
     setup_traversal(grid);
 
+    // Compute a clipping distance from the bounding box of the scene
+    auto scene_size = length(grid.bbox.extents());
+    if (opts.clip <= 0) {
+        opts.clip = scene_size;
+    }
+
     if (opts.ray_file != "") {
         std::cout << "Entering benchmark mode" << std::endl;
         if (!benchmark(mem, grid, tris, opts.ray_file, opts.tmin, opts.tmax, opts.bench_iter, opts.bench_warmup))
             return 1;
         return 0;
     }
+
+    std::cout << "Entering interactive mode\n"
+                 "Commands:\n"
+                 "  mouse, arrow keys  Move the camera\n"
+                 "  numpad '+'/'-'     Control camera movement speed\n"
+                 "  'm'                Cycle through display modes\n"
+                 "  'c'                Prints the camera position" << std::endl;
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         std::cerr << "Cannot initialize SDL" << std::endl;
@@ -527,7 +540,8 @@ int main(int argc, char** argv) {
         vec3(0.0f,  0.0f, 1.0f),     // Forward
         vec3(-1.0f, 0.0f, 0.0f),     // Right
         vec3(0.0f,  1.0f, 0.0f),     // Up
-        100.0f, 0.005f, 1.0f         // View distance, rotation speed, translation speed
+        100.0f, 0.005f,              // View distance, rotation speed
+        scene_size * 0.005f          // Translation speed
     };
 
     size_t num_rays = opts.width * opts.height;
