@@ -33,6 +33,12 @@ struct View {
     float tspeed;
 };
 
+enum class DisplayMode {
+    DEPTH,
+    GRAY_SCALE,
+    HEAT_MAP
+};
+
 inline Camera gen_camera(const vec3& eye, const vec3& center, const vec3& up, float fov, float ratio) {
     Camera cam;
     const float f = tanf(M_PI * fov / 360);
@@ -59,15 +65,46 @@ inline void gen_rays(const Camera& cam, std::vector<Ray>& rays, float clip, int 
     }
 }
 
-template <bool display_mode>
+void gradient(uint8_t* color, float k) {
+    static const vec3 g[] = {
+        vec3(0, 0, 255),
+        vec3(0, 255, 255),
+        vec3(0, 128, 0),
+        vec3(255, 255, 0),
+        vec3(255, 0, 0)
+    };
+    constexpr int n = sizeof(g) / sizeof(g[0]);
+    static const float s = 1.0f / n;
+
+    int i = min(n - 1, int(k * n));
+    int j = min(n - 1, i + 1);
+
+    float t = (k - i * s) / s;
+    auto c = (1.0f - t) * g[i] + t * g[j];
+
+    color[0] = c.z;
+    color[1] = c.y;
+    color[2] = c.x;
+}
+
+template <DisplayMode mode>
 void update_surface(SDL_Surface* surf, std::vector<Hit>& hits, float clip, int w, int h) {
     for (int y = 0, my = std::min(surf->h, h); y < my; y++) {
         unsigned char* row = (unsigned char*)surf->pixels + surf->pitch * y;
         for (int x = 0, mx = std::min(surf->w, w); x < mx; x++) {
-            const unsigned char color = display_mode ? hits[y * w + x].id : 255.0f * hits[y * w + x].t / clip;
-            row[x * 4 + 0] = color;
-            row[x * 4 + 1] = color;
-            row[x * 4 + 2] = color;
+            if (mode == DisplayMode::DEPTH) {
+                uint8_t color = 255.0f * hits[y * w + x].t / clip;
+                row[x * 4 + 0] = color;
+                row[x * 4 + 1] = color;
+                row[x * 4 + 2] = color;
+            } else if (mode == DisplayMode::GRAY_SCALE) {
+                uint8_t color = std::min(255, hits[y * w + x].id);
+                row[x * 4 + 0] = color;
+                row[x * 4 + 1] = color;
+                row[x * 4 + 2] = color;
+            } else if (mode == DisplayMode::HEAT_MAP) {
+                gradient(row + x * 4, std::min(100, hits[y * w + x].id) / 100.0f);
+            }
             row[x * 4 + 3] = 255;
         }
     }
@@ -258,7 +295,7 @@ static bool load_rays(const std::string& file_name, std::vector<Ray>& rays, floa
     return true;
 }
 
-bool handle_events(View& view, bool& display_mode) {
+bool handle_events(View& view, DisplayMode& display_mode) {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         switch (event.type) {
@@ -289,7 +326,14 @@ bool handle_events(View& view, bool& display_mode) {
                             std::cout << "Up: " << view.up.x << " " << view.up.y << " " << view.up.z << std::endl;
                         }
                         break;
-                    case SDLK_m: display_mode = !display_mode; break;
+                    case SDLK_m:
+                        if (display_mode == DisplayMode::DEPTH)
+                            display_mode = DisplayMode::GRAY_SCALE;
+                        else if (display_mode == DisplayMode::GRAY_SCALE)
+                            display_mode = DisplayMode::HEAT_MAP;
+                        else if (display_mode == DisplayMode::HEAT_MAP)
+                            display_mode = DisplayMode::DEPTH;
+                        break;
                     case SDLK_ESCAPE:
                         return true;
                 }
@@ -494,7 +538,7 @@ int main(int argc, char** argv) {
     double kernel_time = 0;
     auto ticks = SDL_GetTicks();
     int frames = 0;
-    bool display_mode = false;
+    DisplayMode display_mode = DisplayMode::DEPTH;
     bool done = false;
     while (!done) {
         Camera cam = gen_camera(view.eye,
@@ -520,8 +564,12 @@ int main(int argc, char** argv) {
 
         mem.copy<Copy::DEV_TO_HST>(host_hits.data(), hits, num_rays);
         SDL_LockSurface(screen);
-        if (display_mode) update_surface<true >(screen, host_hits, opts.clip, opts.width, opts.height);
-        else              update_surface<false>(screen, host_hits, opts.clip, opts.width, opts.height);
+        if (display_mode == DisplayMode::DEPTH)
+            update_surface<DisplayMode::DEPTH>(screen, host_hits, opts.clip, opts.width, opts.height);
+        else if (display_mode == DisplayMode::GRAY_SCALE)
+            update_surface<DisplayMode::GRAY_SCALE>(screen, host_hits, opts.clip, opts.width, opts.height);
+        else
+            update_surface<DisplayMode::HEAT_MAP>(screen, host_hits, opts.clip, opts.width, opts.height);
         SDL_UnlockSurface(screen);
 
         SDL_UpdateWindowSurface(win);
