@@ -296,13 +296,22 @@ static bool load_rays(const std::string& file_name, std::vector<Ray>& rays, floa
 }
 
 bool handle_events(View& view, DisplayMode& display_mode) {
+    static bool arrows[4], camera_on;
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         switch (event.type) {
             case SDL_QUIT:
                 return true;
+            case SDL_MOUSEBUTTONDOWN:
+                SDL_SetRelativeMouseMode(SDL_TRUE);
+                camera_on = true;
+                break;
+            case SDL_MOUSEBUTTONUP:
+                camera_on = false;
+                SDL_SetRelativeMouseMode(SDL_FALSE);
+                break;
             case SDL_MOUSEMOTION:
-                if (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON(SDL_BUTTON_LEFT)) {
+                if (camera_on) {
                     view.right = cross(view.forward, view.up);
                     view.forward = rotate(view.forward, view.right, -event.motion.yrel * view.rspeed);
                     view.forward = rotate(view.forward, view.up,    -event.motion.xrel * view.rspeed);
@@ -310,12 +319,20 @@ bool handle_events(View& view, DisplayMode& display_mode) {
                     view.up = normalize(cross(view.right, view.forward));
                 }
                 break;
+            case SDL_KEYUP:
+                switch (event.key.keysym.sym) {
+                    case SDLK_UP:    arrows[0] = false; break;
+                    case SDLK_DOWN:  arrows[1] = false; break;
+                    case SDLK_LEFT:  arrows[2] = false; break;
+                    case SDLK_RIGHT: arrows[3] = false; break;
+                }
+                break;
             case SDL_KEYDOWN:
                 switch (event.key.keysym.sym) {
-                    case SDLK_UP:    view.eye = view.eye + view.tspeed * view.forward; break;
-                    case SDLK_DOWN:  view.eye = view.eye - view.tspeed * view.forward; break;
-                    case SDLK_LEFT:  view.eye = view.eye - view.tspeed * view.right;   break;
-                    case SDLK_RIGHT: view.eye = view.eye + view.tspeed * view.right;   break;
+                    case SDLK_UP:    arrows[0] = true; break;
+                    case SDLK_DOWN:  arrows[1] = true; break;
+                    case SDLK_LEFT:  arrows[2] = true; break;
+                    case SDLK_RIGHT: arrows[3] = true; break;
                     case SDLK_KP_PLUS:  view.tspeed *= 1.1f; break;
                     case SDLK_KP_MINUS: view.tspeed /= 1.1f; break;
                     case SDLK_c:
@@ -340,6 +357,12 @@ bool handle_events(View& view, DisplayMode& display_mode) {
                 break;
         }
     }
+
+    if (arrows[0]) view.eye = view.eye + view.tspeed * view.forward;
+    if (arrows[1]) view.eye = view.eye - view.tspeed * view.forward;
+    if (arrows[2]) view.eye = view.eye - view.tspeed * view.right;
+    if (arrows[3]) view.eye = view.eye + view.tspeed * view.right;
+
     return false;
 }
 
