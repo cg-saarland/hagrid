@@ -47,7 +47,7 @@ Once built, the project provides a library for traversal, a library for the cons
 
       src/hagrid scene.obj --build-iter 10 --build-warmup 5 --keep-alive
       
-- Loads the file `scene.obj`, builds an irregular grid with default parameters, and benchmark the traversal by running it on the given ray distribution (the file `distribution.rays`, containing each ray stored as 6 floats in binary format---3 for the origin and 3 for the direction) 100 times with 20 warmup iterations, and limit the distance along the ray to the range [0, 1000]:
+- Loads the file `scene.obj`, builds an irregular grid with default parameters, and benchmark the traversal by running it on the given ray distribution (the file `distribution.rays`, containing each ray stored as 6 floats in binary format---3 for the origin and 3 for the direction) 100 times with 20 warmup iterations, and limit the distance along the ray to the range [0, 100]:
 
       src/hagrid scene.obj --ray-file distribution.rays --bench-iter 100 --bench-warmup 20 -tmin 0 -tmax 100
 
