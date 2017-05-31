@@ -14,9 +14,9 @@ Some improvements have been made to the construction algorithm, which change the
 - Memory consumption is lower (~ -20%)
 - Traversal is slower (~ -5%)
 
-The traversal being slower can easily being remedied by increasing the resolution.
-The improvements in build times and memory consumption more than compensate the loss in traversal performance.
-Another option is to use the slower but more precise expansion algorithm, which can be enabled in [src/expand.cu](src/expand.cu) by setting the `subset_only` variable to false.
+The traversal being slower can easily being remedied by increasing the resolution (the default parameters are the parameters used in the paper, which will result in lower performance than what was reported for the reasons above). The improvements in build times and memory consumption more than compensate the loss in traversal performance. As a recommendation, use `--top-density 0.15 --snd-density 3.0` if you want to get approximately the same performance as the original paper. Increasing the resolution further will result in higher performance, and the new voxel map structure should prevent the memory usage from exploding.
+
+Another option is to use the slower but more precise expansion algorithm, which can be enabled in [src/expand.cu](src/expand.cu#L159) by setting the `subset_only` variable to false. This algorithm is slower than the simpler subset expansion algorithm, but it will give a significant performance boost.
 
 ## Building
 
