@@ -77,10 +77,13 @@ __global__ void traverse(const Entry* __restrict__ entries,
         steps += 1 + max(0, cell.end - cell.begin);
 
         // Intersect the cell contents and exit if an intersection was found
+        auto ref = cell.begin < cell.end ? ref_ids[cell.begin] : 0;
         for (int i = cell.begin; i < cell.end; i++) {
-            auto ref = ref_ids[i];
+            // Preload the next reference
+            auto next = i + 1 < cell.end ? ref_ids[i + 1] : ref;
             auto prim = load_prim(prims + ref);
             intersect_prim_ray(prim, Ray(ray.org, ray.tmin, ray.dir, hit.t), ref, hit);
+            ref = next;
         }
 
         if (hit.t <= texit ||
