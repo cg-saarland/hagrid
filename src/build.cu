@@ -751,6 +751,7 @@ void build(MemManager& mem, const Primitive* prims, int num_prims, Grid& grid, f
     while (build_iter(mem, prims, num_prims, dims, log_dims, levels)) iter++;
 
     concat_levels(mem, levels, grid);
+    grid.small_cells = nullptr;
     grid.dims  = dims;
     grid.bbox  = grid_bb;
 }

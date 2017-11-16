@@ -32,11 +32,25 @@ struct Cell {
     {}
 };
 
+/// Compressed irregular grid cell
+struct SmallCell {
+    usvec3 min;     ///< Minimum bounding box coordinate
+    usvec3 max;     ///< Maximum bounding box coordinate
+    int begin;      ///< Index of the first reference
+
+    HOST DEVICE SmallCell() {}
+    HOST DEVICE SmallCell(const usvec3& min, const usvec3& max, int begin)
+        : min(min), max(max), begin(begin)
+    {}
+};
+
 /// Structure holding an irregular grid
 struct Grid {
     Entry* entries;             ///< Voxel map, stored as a contiguous array
     int*   ref_ids;             ///< Array of primitive references
-    Cell*  cells;               ///< Cells of the structure
+    Cell*  cells;               ///< Cells of the structure (nullptr if compressed)
+
+    SmallCell* small_cells;     ///< Compressed cells (nullptr if not compressed)
 
     BBox bbox;                  ///< Bounding box of the scene
     ivec3 dims;                 ///< Top-level dimensions
@@ -119,6 +133,22 @@ __device__ __forceinline__ void store_cell(Cell* cell_ptr, const Cell& cell) {
     int4* ptr = (int4*)cell_ptr;
     ptr[0] = make_int4(cell.min.x, cell.min.y, cell.min.z, cell.begin);
     ptr[1] = make_int4(cell.max.x, cell.max.y, cell.max.z, cell.end);
+}
+
+__device__ __forceinline__ SmallCell load_small_cell(const SmallCell* cell_ptr) {
+    const uint4* ptr = (const uint4*)cell_ptr;
+    auto cell = *ptr;
+    return SmallCell(usvec3(cell.x, cell.x >> 16, cell.y),
+                     usvec3(cell.y >> 16, cell.z, cell.z >> 16),
+                     cell.w);
+}
+
+__device__ __forceinline__ void store_small_cell(const SmallCell* cell_ptr, const SmallCell& cell) {
+    uint4* ptr = (uint4*)cell_ptr;
+    *ptr = make_uint4(cell.min.x | ((uint)(cell.min.y) << 16),
+                      cell.min.z | ((uint)(cell.max.x) << 16),
+                      cell.max.y | ((uint)(cell.max.z) << 16),
+                      (uint)cell.begin);
 }
 #endif // __NVCC__
 

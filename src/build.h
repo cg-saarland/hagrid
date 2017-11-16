@@ -27,6 +27,9 @@ void flatten_grid(MemManager& mem, Grid& grid);
 /// Performs the cell expansion optimization (expands cells over neighbors that share the same set of primitives).
 void expand_grid(MemManager& mem, Grid& grid, const Tri* tris, int iters);
 
+/// Tries to compress the grid by using sentinels in the reference array and using 16-bit cell dimensions. Returns true on success, otherwise false.
+bool compress_grid(MemManager& mem, Grid& grid);
+
 } // namespace hagrid
 
 #endif // BUILD_H

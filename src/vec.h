@@ -135,8 +135,10 @@ HOST DEVICE T get(const tvec3<T>& v) {
 
 typedef tvec2<float> vec2;
 typedef tvec2<int>   ivec2;
+typedef tvec2<unsigned short> usvec2;
 typedef tvec3<float> vec3;
 typedef tvec3<int>   ivec3;
+typedef tvec3<unsigned short> usvec3;
 
 } // namespace hagrid
 

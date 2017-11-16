@@ -124,6 +124,7 @@ struct ProgramOptions {
     int bench_warmup;
     float tmin, tmax;
     bool keep_alive;
+    bool compress;
     bool help;
 
     ProgramOptions()
@@ -142,6 +143,7 @@ struct ProgramOptions {
         , tmin(0)
         , tmax(std::numeric_limits<float>::max())
         , keep_alive(false)
+        , compress(false)
         , help(false)
     {}
 
@@ -210,6 +212,8 @@ bool ProgramOptions::parse(int argc, char** argv) {
             build_warmup = strtol(argv[++i], nullptr, 10);
         } else if (matches(arg, "-k", "--keep-alive")) {
             keep_alive = true;
+        } else if (matches(arg, "-z", "--compress")) {
+            compress = true;
         } else if (matches(arg, "-r", "--ray-file")) {
             if (!arg_exists(argv, i, argc)) return false;
             ray_file = argv[++i];
@@ -382,6 +386,7 @@ static void usage() {
                  "  -nb     --build-iter    Sets the number of build iterations\n"
                  "  -wb     --build-warmup  Sets the number of warmup build iterations\n"
                  "  -k      --keep-alive    Keep the buffers alive during construction\n"
+                 "  -z      --compress      Compress the cells after construction\n"
                  " Benchmarking:\n"
                  "  -r      --ray-file      Loads rays from a file and enters benchmark mode\n"
                  "  -tmin   --tmin          Sets the minimum distance along every ray\n"
@@ -482,6 +487,7 @@ int main(int argc, char** argv) {
         merge_grid(mem, grid, opts.alpha);
         flatten_grid(mem, grid);
         expand_grid(mem, grid, tris, opts.exp_iters);
+        if (opts.compress) compress_grid(mem, grid);
     }
 
     // Benchmark construction speed
@@ -496,9 +502,13 @@ int main(int argc, char** argv) {
             merge_grid(mem, grid, opts.alpha);
             flatten_grid(mem, grid);
             expand_grid(mem, grid, tris, opts.exp_iters);
+            if (opts.compress) compress_grid(mem, grid);
         });
         total_time += kernel_time;
     }
+    if (opts.compress && !grid.small_cells)
+        std::cerr << "Could not compress grid. Continuing with uncompressed structure." << std::endl;
+
     auto dims = grid.dims << grid.shift;
     std::cout << "Grid built in " << total_time / opts.build_iter << " ms ("
               << dims.x << "x" << dims.y << "x" << dims.z << ", "
@@ -510,7 +520,7 @@ int main(int argc, char** argv) {
     std::cout << std::endl;
 #endif
 
-    const size_t cells_mem = grid.num_cells * sizeof(Cell);
+    const size_t cells_mem = grid.num_cells * (grid.small_cells ? sizeof(SmallCell) : sizeof(Cell));
     const size_t entries_mem = grid.num_entries * sizeof(int);
     const size_t refs_mem = grid.num_refs * sizeof(int);
     const size_t tris_mem = host_tris.size() * sizeof(Tri);
