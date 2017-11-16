@@ -38,15 +38,15 @@ Once built, the project provides a library for traversal, a library for the cons
 
       src/hagrid
 
-- Loads the file `scene.obj`, builds an irregular grid using default parameters and display an interactive view:
+- Loads the file `scene.obj`, builds an irregular grid using default parameters and displays an interactive view:
 
       src/hagrid scene.obj
     
-- Loads the file `scene.obj`, builds an irregular grid with top-level density 0.12, second-level density 0.24, alpha 0.995 (threshold to control cell merging---see the paper), 3 expansion passes, and display an interactive view:
+- Loads the file `scene.obj`, builds an irregular grid with top-level density 0.12, second-level density 0.24, alpha 0.995 (threshold to control cell merging---see the paper), 3 expansion passes, and displays an interactive view:
 
       src/hagrid scene.obj --top-density 0.12 --snd-density 2.4 --alpha 0.995 --expansion 3
     
-- Loads the file `scene.obj`, benchmarks the construction with default parameters by running 10 construction iterations and 5 warmup construction iterations and keeps intermediate buffers alive (should be preferred when benchmarking construction times), and finally display an interactive view:
+- Loads the file `scene.obj`, benchmarks the construction with default parameters by running 10 construction iterations and 5 warmup construction iterations and keeps intermediate buffers alive (should be preferred when benchmarking construction times), and finally displays an interactive view:
 
       src/hagrid scene.obj --build-iter 10 --build-warmup 5 --keep-alive
       
