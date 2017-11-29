@@ -115,6 +115,31 @@ HOST DEVICE inline uint32_t lookup_entry(const Entry* entries, int shift, const 
     return entry.begin;
 }
 
+template <typename F>
+HOST DEVICE int foreach_ref(Cell cell, const int* ref_ids, F f) {
+    auto ref = ref_ids[cell.begin];
+    for (int i = cell.begin; ; i++) {
+        // Preload the next reference
+        auto next = i + 1 < cell.end ? ref_ids[i + 1] : ref;
+        f(ref);
+        if (ref == next) break;
+        ref = next;
+    }
+    return cell.end - cell.begin;
+}
+
+template <typename F>
+HOST DEVICE int foreach_ref(SmallCell small_cell, const int* ref_ids, F f) {
+    auto cur = small_cell.begin;
+    auto ref = cur >= 0 ? ref_ids[cur++] : -1;
+    while (ref >= 0) {
+        auto next = ref_ids[cur++];
+        f(ref);
+        ref = next;
+    }
+    return cur - small_cell.begin;
+}
+
 #ifdef __NVCC__
 __device__ __forceinline__ Cell load_cell(const Cell* cell_ptr) {
     const int4* ptr = (const int4*)cell_ptr;
@@ -135,7 +160,7 @@ __device__ __forceinline__ void store_cell(Cell* cell_ptr, const Cell& cell) {
     ptr[1] = make_int4(cell.max.x, cell.max.y, cell.max.z, cell.end);
 }
 
-__device__ __forceinline__ SmallCell load_small_cell(const SmallCell* cell_ptr) {
+__device__ __forceinline__ SmallCell load_cell(const SmallCell* cell_ptr) {
     const uint4* ptr = (const uint4*)cell_ptr;
     auto cell = *ptr;
     return SmallCell(usvec3(cell.x, cell.x >> 16, cell.y),
@@ -143,7 +168,7 @@ __device__ __forceinline__ SmallCell load_small_cell(const SmallCell* cell_ptr) 
                      cell.w);
 }
 
-__device__ __forceinline__ void store_small_cell(const SmallCell* cell_ptr, const SmallCell& cell) {
+__device__ __forceinline__ void store_cell(const SmallCell* cell_ptr, const SmallCell& cell) {
     uint4* ptr = (uint4*)cell_ptr;
     *ptr = make_uint4(cell.min.x | ((uint)(cell.min.y) << 16),
                       cell.min.z | ((uint)(cell.max.x) << 16),

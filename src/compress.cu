@@ -26,7 +26,7 @@ __global__ void emit_small_cells(const Cell* cells,
     int count = cell.end - cell.begin;
 
     SmallCell small_cell(usvec3(cell.min), usvec3(cell.max), count > 0 ? first : -1);
-    store_small_cell(small_cells + id, small_cell);
+    store_cell(small_cells + id, small_cell);
    
     if (count > 0) {
         for (int i = 0; i < count; i++)
