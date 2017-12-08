@@ -117,12 +117,11 @@ HOST DEVICE inline uint32_t lookup_entry(const Entry* entries, int shift, const 
 
 template <typename F>
 HOST DEVICE int foreach_ref(Cell cell, const int* ref_ids, F f) {
-    auto ref = ref_ids[cell.begin];
-    for (int i = cell.begin; ; i++) {
+    int cur = cell.begin, ref = cur < cell.end ? ref_ids[cur++] : -1;
+    while (ref >= 0) {
         // Preload the next reference
-        auto next = i + 1 < cell.end ? ref_ids[i + 1] : ref;
+        auto next = cur < cell.end ? ref_ids[cur++] : -1;
         f(ref);
-        if (ref == next) break;
         ref = next;
     }
     return cell.end - cell.begin;
