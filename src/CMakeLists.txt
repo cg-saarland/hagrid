@@ -40,4 +40,4 @@ set_target_properties(hagrid_traverse PROPERTIES LINKER_LANGUAGE CXX)
 
 add_executable(hagrid main.cpp load_obj.cpp load_obj.h grid.h traverse.h build.h vec.h)
 target_compile_definitions(hagrid PRIVATE HOST= DEVICE=)
-target_link_libraries(hagrid ${SDL2_LIBRARY} ${CUDA_LIBRARIES} hagrid_build hagrid_traverse)
+target_link_libraries(hagrid hagrid_build hagrid_traverse ${CUDA_LIBRARIES} ${SDL2_LIBRARY})
