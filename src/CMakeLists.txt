@@ -21,7 +21,7 @@ cuda_compile(HAGRID_BUILD
     prims.h
     ray.h
     common.h
-    OPTIONS ${OPT_FLAG} "-std=c++11;--expt-extended-lambda;-arch=sm_52;-lineinfo;-DHOST=__host__;-DDEVICE=__device__")
+    OPTIONS ${OPT_FLAG} "-std=c++11;--expt-extended-lambda;-lineinfo;-DHOST=__host__;-DDEVICE=__device__")
 
 add_library(hagrid_build ${HAGRID_BUILD})
 set_target_properties(hagrid_build PROPERTIES LINKER_LANGUAGE CXX)
@@ -33,7 +33,7 @@ cuda_compile(HAGRID_TRAVERSE
     prims.h
     vec.h
     grid.h
-    OPTIONS ${OPT_FLAG} "-std=c++11;--expt-extended-lambda;-arch=sm_52;-lineinfo;--maxrregcount=40;-DHOST=__host__;-DDEVICE=__device__")
+    OPTIONS ${OPT_FLAG} "-std=c++11;--expt-extended-lambda;-lineinfo;--maxrregcount=40;-DHOST=__host__;-DDEVICE=__device__")
 
 add_library(hagrid_traverse ${HAGRID_TRAVERSE})
 set_target_properties(hagrid_traverse PROPERTIES LINKER_LANGUAGE CXX)

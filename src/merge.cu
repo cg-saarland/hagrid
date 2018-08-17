@@ -246,8 +246,9 @@ __global__ void merge(const Entry* __restrict__ entries,
     bool merge = next_begin < next_end;
 
     // Process consecutive ranges of cells that do not want to be merged
-    uint32_t merge_mask = __ballot(valid & !merge);
-    uint32_t full_mask  = __ballot(cell_begin < cell_end);
+    static constexpr unsigned all_mask = unsigned(-1);
+    uint32_t merge_mask = __ballot_sync(all_mask, valid & !merge);
+    uint32_t full_mask  = __ballot_sync(all_mask, cell_begin < cell_end);
     while (merge_mask) {
         // Find the range of cells [first_bit, last_bit] that are not merged
         auto first_bit = __ffs(merge_mask) - 1;
@@ -261,9 +262,9 @@ __global__ void merge(const Entry* __restrict__ entries,
         first_bit += __ffs(shift_mask) - 1;
         last_bit  -= __clz(full_mask << (31 - last_bit));
 
-        auto begin     = __shfl(cell_begin,     first_bit);
-        auto end       = __shfl(cell_end,       last_bit);
-        auto new_begin = __shfl(new_refs_begin, first_bit);
+        auto begin     = __shfl_sync(all_mask, cell_begin,     first_bit);
+        auto end       = __shfl_sync(all_mask, cell_end,       last_bit);
+        auto new_begin = __shfl_sync(all_mask, new_refs_begin, first_bit);
         for (int i = begin + warp_id, j = new_begin + warp_id; i < end; i += 32, j += 32)
             new_refs[j] = refs[i];
     }

@@ -103,21 +103,22 @@ emit_new_refs(const BBox* __restrict__ bboxes,
         }
     }
 
-    int mask = __ballot(blocked);
+    static constexpr unsigned all_mask = unsigned(-1);
+    int mask = __ballot_sync(all_mask, blocked);
     while (mask) {
         int bit = __ffs(mask) - 1;
         mask &= ~(1 << bit);
 
-        int warp_start = __shfl(start, bit);
-        int warp_end   = __shfl(end,   bit);
-        int warp_id    = threadIdx.x - __shfl(threadIdx.x, 0);
+        int warp_start = __shfl_sync(all_mask, start, bit);
+        int warp_end   = __shfl_sync(all_mask, end,   bit);
+        int warp_id    = threadIdx.x - __shfl_sync(all_mask, threadIdx.x, 0);
 
-        int lx = __shfl(range.lx, bit);
-        int ly = __shfl(range.ly, bit);
-        int lz = __shfl(range.lz, bit);
-        int hx = __shfl(range.hx, bit);
-        int hy = __shfl(range.hy, bit);
-        int r  = __shfl(id, bit);
+        int lx = __shfl_sync(all_mask, range.lx, bit);
+        int ly = __shfl_sync(all_mask, range.ly, bit);
+        int lz = __shfl_sync(all_mask, range.lz, bit);
+        int hx = __shfl_sync(all_mask, range.hx, bit);
+        int hy = __shfl_sync(all_mask, range.hy, bit);
+        int r  = __shfl_sync(all_mask, id, bit);
 
         int sx = hx - lx + 1;
         int sy = hy - ly + 1;
