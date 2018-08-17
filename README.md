@@ -30,6 +30,9 @@ This project requires CUDA, SDL2, and CMake. Use the following commands to build
     cmake-gui ..
     make -j
 
+If you encounter any problems when building, make sure you clone the repository with the `--recursive` option, so that all submodules are cloned as well.
+If the submodules are properly downloaded, the `/lib` directory should no longer be empty.
+
 ## Testing and Benchmarking
 
 Once built, the project provides a library for traversal, a library for the construction, and a test/benchmark executable. The executable uses command line arguments to specify the scene to use. The scene must be in the OBJ format. Here is a list of typical uses of the command line program:
